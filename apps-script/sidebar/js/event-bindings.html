@@ -68,14 +68,7 @@ $('.results-panel').on('click keydown', '.result-item', function (event) {
   var key = $(this).attr('data-key');
   var item = queryState.libraryMatches.concat(queryState.searchResults).find(function (result) { return result.key === key; });
   if (!item) return;
-
-  selectedResultKey = item.key;
-  selectedResultSummary = { label: item.label || item.ref, subtitle: item.subtitle || '' };
-  resultsCollapsed = true;
-  $('.result-item').removeClass('selected').attr('aria-pressed', 'false');
-  $(this).addClass('selected').attr('aria-pressed', 'true');
-  updateResultsVisibility();
-  resolveSelectedResult(item.ref, item.label || item.ref);
+  selectResultItem(item);
 });
 
 $('.results-panel').on('click', '.result-group-remove', function (event) {
@@ -91,6 +84,9 @@ $('.results-panel').on('click', '.result-filter-chip', function (event) {
   var corpusKey = $(this).attr('data-corpus-key');
   if (!corpusKey) return;
   toggleCorpusVisibility(corpusKey);
+  // The strip was redrawn: keep the keyboard on the chip pressed.
+  var chip = $('.corpus-chip').filter(function () { return $(this).attr('data-corpus-key') === corpusKey; }).get(0);
+  if (chip) chip.focus();
 });
 
 $('.results-toggle-button').on('click', function () {
@@ -160,11 +156,7 @@ $(document).on('change', '.translation-language-any', function () {
   }
   updateTranslationLanguageVisibility();
   saveLastUsedSearchSettings();
-  if (getAllRawResults().length) {
-    reprocessAndRenderResults();
-  } else if (($('.input').val() || '').trim()) {
-    runUnifiedQuery();
-  }
+  refreshTextSearchForLanguageFilter_();
 });
 
 $(document).on('change', '.translation-language-option', function () {
@@ -175,11 +167,7 @@ $(document).on('change', '.translation-language-option', function () {
   }
   updateTranslationLanguageVisibility();
   saveLastUsedSearchSettings();
-  if (getAllRawResults().length) {
-    reprocessAndRenderResults();
-  } else if (($('.input').val() || '').trim()) {
-    runUnifiedQuery();
-  }
+  refreshTextSearchForLanguageFilter_();
 });
 
 // Session library item interactions are handled by delegated bindings below.
@@ -190,6 +178,21 @@ $('.results-panel').on('click', '.result-pin-button', function (event) {
   togglePinnedRef($(this).attr('data-ref'), $(this).attr('data-label'));
 });
 
+// The help button is independent of the summary's expand/collapse action.
+$(document).on('click', '.sidebar-option-help-button', function (event) {
+  event.preventDefault();
+  $(this).parent().removeAttr('data-dismissed');
+  this.focus({ preventScroll: true });
+}).on('keydown', '.sidebar-option-help-button', function (event) {
+  if (event.key !== 'Escape') return;
+  event.preventDefault();
+  event.stopPropagation();
+  $(this).parent().attr('data-dismissed', '');
+});
+$(document).on('mouseenter focusin', '.sidebar-option-help', function () {
+  $(this).removeAttr('data-dismissed');
+});
+
 $('.output-mode-selection').on('change', function () {
   updateBilingualLayoutVisibility();
   updateTranslationDetailsVisibility();
@@ -198,9 +201,7 @@ $('.output-mode-selection').on('change', function () {
   updateTransliterationVisibility();
   syncDisplayModeCards();
   saveSidebarPreference({ output_mode_default: $('.output-mode-selection').val() });
-  if (hasResolvedReference && data && data.ref) {
-    updateSuggestion(data, selectedResultSummary ? selectedResultSummary.label : data.ref);
-  }
+  refreshPreviewForOutputMode();
 });
 
 // The Display and Layout pickers' clicks: initInsertionOptions in
@@ -222,11 +223,7 @@ $(document).on('click', '.lang-filter-chip', function (event) {
   }
   updateTranslationLanguageVisibility();
   saveLastUsedSearchSettings();
-  if (getAllRawResults().length) {
-    reprocessAndRenderResults();
-  } else if (($('.input').val() || '').trim()) {
-    runUnifiedQuery();
-  }
+  refreshTextSearchForLanguageFilter_();
 });
 
 $(document).on('click', '.lang-filter-clear-chip', function (event) {
@@ -236,103 +233,14 @@ $(document).on('click', '.lang-filter-clear-chip', function (event) {
   syncCompactTranslationLanguageUI();
   updateTranslationLanguageVisibility();
   saveLastUsedSearchSettings();
-  if (getAllRawResults().length) {
-    reprocessAndRenderResults();
-  } else if (($('.input').val() || '').trim()) {
-    runUnifiedQuery();
-  }
-});
-
-// ── Experimental controls — card status, stepper ─────────────────────────────
-
-// Set busy state on an exp-card
-function expSetBusy($card, isBusy, loadingLabel, defaultLabel) {
-  $card.toggleClass('exp-busy', isBusy);
-  var $btn = $card.find('.exp-action-btn');
-  $btn.prop('disabled', isBusy);
-  if (isBusy) {
-    $btn.html('<span class="exp-spinner" aria-hidden="true"></span>' + loadingLabel);
-  } else {
-    $btn.text(defaultLabel);
-  }
-}
-
-// Set status text on an exp-card
-function expSetStatus($card, message, kind) {
-  var $s = $card.find('.exp-status');
-  $s.text(message).removeClass('exp-error exp-success');
-  if (kind) $s.addClass(kind);
-}
-
-// Set status HTML on an exp-card (for rich content like links)
-function expSetStatusHTML($card, html, kind) {
-  var $s = $card.find('.exp-status');
-  $s.html(html).removeClass('exp-error exp-success');
-  if (kind) $s.addClass(kind);
-}
-
-// Stepper: decrement
-$(document).on('click', '#sm-count-dec', function () {
-  var $val = $('#sm-inline-count');
-  var v = parseInt($val.val(), 10) || 3;
-  if (v > 1) {
-    $val.val(v - 1);
-    $('#sm-count-dec').prop('disabled', v - 1 <= 1);
-    $('#sm-count-inc').prop('disabled', false);
-  }
-});
-
-// Stepper: increment
-$(document).on('click', '#sm-count-inc', function () {
-  var $val = $('#sm-inline-count');
-  var v = parseInt($val.val(), 10) || 3;
-  if (v < 10) {
-    $val.val(v + 1);
-    $('#sm-count-inc').prop('disabled', v + 1 >= 10);
-    $('#sm-count-dec').prop('disabled', false);
-  }
+  refreshTextSearchForLanguageFilter_();
 });
 
 // ── Surprise Me ───────────────────────────────────────────────────────────────
-
-$('#sm-inline-launch').off('click').on('click', function () {
-  var $card = $('#exp-card-surprise');
-  var term  = ($('#sm-inline-term').val() || '').trim();
-  var count = Math.max(1, Math.min(10, parseInt($('#sm-inline-count').val(), 10) || 3));
-  var payload = {
-    term:     term || null,
-    count:    count,
-    corpuses: ['Tanakh', 'Mishnah', 'Talmud', 'Midrash', 'Halakhah'],
-    sortMode: 'relevance'
-  };
-
-  expSetBusy($card, true, 'Searching…', 'Discover Sources');
-  expSetStatus($card,
-    term ? 'Finding sources — almost there.'
-         : 'No topic? We’ll pick one. Finding sources…', '');
-
-  google.script.run
-    .withSuccessHandler(function (result) {
-      expSetBusy($card, false, '', 'Discover Sources');
-      if (!result || result.success === false) {
-        expSetStatus($card,
-          (result && result.message) ? result.message
-            : 'No matching sources found. Try a different topic or leave it blank.',
-          'exp-error');
-        return;
-      }
-      var msg = '✓ ' + count + ' source' + (count === 1 ? '' : 's') + ' inserted at your cursor.';
-      if (!term && result.seedWord) msg += ' We used the word ‘' + result.seedWord + '’.';
-      expSetStatus($card, msg, 'exp-success');
-      setTimeout(function () { expSetStatus($card, '', ''); }, 5000);
-    })
-    .withFailureHandler(function (err) {
-      expSetBusy($card, false, '', 'Discover Sources');
-      expSetStatus($card,
-        (err && err.message) ? err.message : 'Something went wrong. Try again.',
-        'exp-error');
-    })
-    .insertSurpriseMe(payload);
+// The Experimental section's card is the shared form (shared/surprise-me),
+// the same as the Surprise Me dialog. Its script loads after this file.
+$(function () {
+  if (typeof initSurpriseMeForm === 'function') initSurpriseMeForm();
 });
 
 $('#restore-corpus-button').off('click').on('click', function (event) {
@@ -363,6 +271,11 @@ $(document).on('click', '.reset-session-overrides-button', function () {
   });
 });
 
+// Settings profiles: the Insertion Options tray's picker (preferences-state).
+$(document).on('change', '#tray-profile-select', function () {
+  switchProfileFromSidebar($(this).val());
+});
+
 $(document).on('click', '.save-session-defaults-button', function () {
   if ($(this).prop('disabled')) return;
   saveSessionAsDefaults(function () {
@@ -374,15 +287,59 @@ $(document).on('click', '.save-session-defaults-button', function () {
 // SESSION LIBRARY — modal open / close
 // ============================================================
 
-var _slDialogPollTimer = null;
-var _slDialogPollCount = 0;
-var _slDialogActive    = false;
+var _slDialogPollTimer   = null;
+var _slDialogPollStarted = 0;
+var _slDialogPollFailures = 0;
+var _slDialogOpening     = false;
+
+// Every second for two minutes, then every five, for an hour: the dialog's
+// changes come back only through this poll. It used to stop after ten minutes,
+// which dropped them, and while it ran Library would not reopen (BUG-009).
+var SL_DIALOG_POLL_FAST_MS_ = 1000;
+var SL_DIALOG_POLL_SLOW_MS_ = 5000;
+var SL_DIALOG_POLL_FAST_FOR_MS_ = 2 * 60 * 1000;
+var SL_DIALOG_POLL_GIVE_UP_MS_ = 60 * 60 * 1000;
+var SL_DIALOG_POLL_MAX_FAILURES_ = 3;
 
 function _stopSlDialogPoll() {
-  if (_slDialogPollTimer) clearInterval(_slDialogPollTimer);
+  if (_slDialogPollTimer) clearTimeout(_slDialogPollTimer);
   _slDialogPollTimer = null;
-  _slDialogPollCount = 0;
-  _slDialogActive    = false;
+  _slDialogPollStarted = 0;
+  _slDialogPollFailures = 0;
+}
+
+function _scheduleSlDialogPoll() {
+  var elapsed = Date.now() - _slDialogPollStarted;
+  if (elapsed > SL_DIALOG_POLL_GIVE_UP_MS_) { _stopSlDialogPoll(); return; }
+  var delay = elapsed < SL_DIALOG_POLL_FAST_FOR_MS_ ? SL_DIALOG_POLL_FAST_MS_ : SL_DIALOG_POLL_SLOW_MS_;
+  _slDialogPollTimer = setTimeout(_pollSlDialog, delay);
+}
+
+function _pollSlDialog() {
+  var started = _slDialogPollStarted;
+  google.script.run
+    .withSuccessHandler(function (action) {
+      if (started !== _slDialogPollStarted) return; // a newer dialog took over
+      _slDialogPollFailures = 0;
+      if (action) _handleSlDialogResult(action);
+      else _scheduleSlDialogPoll();
+    })
+    .withFailureHandler(function () {
+      if (started !== _slDialogPollStarted) return;
+      if (++_slDialogPollFailures >= SL_DIALOG_POLL_MAX_FAILURES_) {
+        _stopSlDialogPoll();
+        showSidebarToast('Couldn\u2019t get the Session Library\u2019s changes back. Open it again to check them.', 6000);
+        return;
+      }
+      _scheduleSlDialogPoll();
+    })
+    .checkSessionLibraryAction();
+}
+
+function _startSlDialogPoll() {
+  _stopSlDialogPoll();
+  _slDialogPollStarted = Date.now();
+  _scheduleSlDialogPoll();
 }
 
 function _handleSlDialogResult(action) {
@@ -397,38 +354,26 @@ function _handleSlDialogResult(action) {
       setFooterButtonStates();
     } catch (e) {}
   }
+  // Opened in its own tab, selected once found (openSessionEntry).
   if (action.selectedRef) {
-    var ref = action.selectedRef;
-    $('.input').val(ref);
-    runUnifiedQuery();
-    setTimeout(function () {
-      var match = (queryState.libraryMatches || []).concat(queryState.searchResults || [])
-        .find(function (item) { return item && item.ref === ref; });
-      if (match && match.key) {
-        selectedResultKey = match.key;
-        selectedResultSummary = { label: match.ref || match.label, subtitle: match.subtitle || '' };
-        updateResultsVisibility();
-        resolveSelectedResult(match.ref, match.ref || match.label);
-      }
-    }, 250);
+    openSessionEntry(findSessionEntry(action.selectedRef) || buildSessionEntry(action.selectedRef, action.selectedRef, 'Other'));
   }
 }
 
 function openSessionLibraryModal() {
-  if (_slDialogActive) return;
+  // Only a click while the dialog is being opened is ignored. One already open
+  // is replaced (Docs shows one dialog at a time), so Library always reopens.
+  if (_slDialogOpening) return;
+  _slDialogOpening = true;
   _stopSlDialogPoll();
   var data = localStorage.getItem('sefariaSidebarSessionLibrary') || '{"pinned":[],"inserted":[]}';
   google.script.run
     .withSuccessHandler(function () {
-      _slDialogActive = true;
-      _slDialogPollTimer = setInterval(function () {
-        if (++_slDialogPollCount > 600) { _stopSlDialogPoll(); return; }
-        google.script.run
-          .withSuccessHandler(function (action) { if (action) _handleSlDialogResult(action); })
-          .checkSessionLibraryAction();
-      }, 1000);
+      _slDialogOpening = false;
+      _startSlDialogPoll();
     })
     .withFailureHandler(function () {
+      _slDialogOpening = false;
       sessionLibrarySearch = '';
       $('#sl-search-input').val('');
       $('#sl-sort-select').val(sessionLibrarySortMode);
@@ -530,19 +475,8 @@ $(document).on('click keydown', '.sl-item', function (event) {
   event.preventDefault();
   var ref = $(this).attr('data-ref');
   if (!ref) return;
-  $('.input').val(ref);
   closeSessionLibraryModal();
-  runUnifiedQuery();
-  setTimeout(function () {
-    var match = queryState.libraryMatches.concat(queryState.searchResults)
-      .find(function (item) { return item && item.ref === ref; });
-    if (match && match.key) {
-      selectedResultKey = match.key;
-      selectedResultSummary = { label: match.ref || match.label, subtitle: match.subtitle || '' };
-      updateResultsVisibility();
-      resolveSelectedResult(match.ref, match.ref || match.label);
-    }
-  }, 250);
+  openSessionEntry(findSessionEntry(ref) || buildSessionEntry(ref, ref, 'Other'));
 });
 
 // Remove button
@@ -567,7 +501,7 @@ $(document).on('click', '.sl-item-pin-btn', function (event) {
     if (pinnedEntry) {
       var ins = (sessionLibrary.inserted || []).filter(function (it) { return it && it.ref !== ref; });
       ins.unshift(pinnedEntry);
-      sessionLibrary.inserted = ins.slice(0, 12);
+      sessionLibrary.inserted = ins.slice(0, SESSION_LIBRARY_MAX.inserted);
     }
   } else {
     // Pin → move to pinned
@@ -576,7 +510,7 @@ $(document).on('click', '.sl-item-pin-btn', function (event) {
     sessionLibrary.inserted = (sessionLibrary.inserted || []).filter(function (it) { return it && it.ref !== ref; });
     var pins = (sessionLibrary.pinned || []).filter(function (it) { return it && it.ref !== ref; });
     pins.unshift(insEntry);
-    sessionLibrary.pinned = pins.slice(0, 12);
+    sessionLibrary.pinned = pins.slice(0, SESSION_LIBRARY_MAX.pinned);
   }
   saveSessionLibrary();
   renderSessionLibrary();

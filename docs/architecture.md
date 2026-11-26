@@ -53,10 +53,15 @@ QC check (see `pre_clasp_qc.sh` step 6).
 
 - **`sidebar.html`** — the main sidebar; most functionality lives here.
   Composes most of `sidebar/js/*.html`, the `shared/ui/*` partials,
-  and the `css/` tokens and components.
-- **`preferences.html`** — preferences dialog. Composes `preferences/css`
-  and `preferences/js`.
-- **`surprise-me.html`** — "surprise me" random-text dialog.
+  and the `css/` tokens and components. Its three search tabs share one
+  workflow, `sidebar/js/search-tabs` (see *The search tabs* below); each tab's
+  own code is in `search-controller` (Texts), `voices` and `lexicon`.
+- **`preferences.html`** — preferences dialog. Composes `preferences/css`,
+  `preferences/js` and `preferences/settings-file-js` (the ⇅ Import/Export
+  modal in either interface, which reaches the dialog through
+  `window.PreferencesDialog`).
+- **`surprise-me.html`** — "surprise me" random-text dialog: the shared
+  `shared/surprise-me` form, the same as the sidebar's Experimental card.
 - **`linker-results.html`** — the Link Texts review dialog. A template
   (`createTemplateFromFile`, not a plain file) so its "Customize this
   insertion" panel can include the shared insertion options below.
@@ -92,6 +97,18 @@ controls inline.
     Preferences → Menu Bar), sidebar bootstrap, and dialog launchers.
   - `first-run.gs` — first-run setup and the Simple / Full interface mode
     (`ui_mode`), including the Simple menu and switching between modes.
+  - `factory-preferences.gs` — the 1.0-style Factory preset, reusable profile
+    resets, and account preference saves.
+  - `settings-file.gs` — Preferences → Details → ⇅ Import/Export: export JSON, preview
+    and apply checked groups of valid `SETTINGS` keys. Target-aware RPCs
+    validate interface and active-profile identity and can update inactive
+    snapshots without switching profiles. Simple targets current preferences;
+    Everything defaults to profile keys, with shared settings opt-in. The new
+    modal preserves interface mode; older RPCs retain their compatibility
+    behavior and signatures.
+  - `settings-profiles.gs` — settings profiles: named sets of the Text and
+    layout / Fonts settings, switched from the Preferences rail in either
+    interface or from the sidebar (see Storage layers).
   - `preferences.gs` — the `SETTINGS` list, `getDefaultPreferences()`,
     account preferences (`UserProperties`) and sidebar session state
     (`CacheService`).
@@ -99,6 +116,10 @@ controls inline.
     to Sefaria's API (texts, search, dictionary, source sheets).
   - `insertion.gs` — writing sources into the document, including
     typography, attribution and multi-translation inserts.
+  - `transliterated-title.gs` — the title of the transliteration's own
+    column: Sefaria's Latin title for the Hebrew one (picked from its
+    unmarked list by matching the Hebrew consonants), else the Hebrew title
+    transliterated from a pointed spelling, else the Latin reference.
   - `document-actions.gs` — Link Texts with Sefaria, Transform Divine
     Names, Insert Source from Selection, Unlink.
   - `linker-prefilter.gs`, `citation-abbreviations.gs` — the local
@@ -122,6 +143,108 @@ controls inline.
 - `apps-script/migrations.gs` — (added Stage 2) preferences schema
   migration on `onOpen`.
 
+## Sefaria text boundary
+
+`server/sefaria-fetch.gs` reads passage content through Texts v3, resolves
+reference bounds through `/api/ref/`, and uses the Versions catalog for exact
+edition/language-family requests. Its adapter retains the internal `he` /
+`text` and edition metadata contract before display filters run. A bilingual
+publication may give both roles the same title; identity includes the edition's
+language/role, not the title alone. Link Texts'
+batch recovery uses the same metadata planner and response normalizer, with
+bounded traversal and response-identity checks. Other Sefaria operations
+keep their current routes. Do not reintroduce a v1 passage-reader fallback:
+the supported Versions metadata endpoint is distinct from the deprecated
+v1 content endpoint.
+
+| Request purpose | Selector and format contract |
+| --- | --- |
+| Default passage | Repeated `version=primary` and `version=translation` |
+| Exact edition | Catalog language family plus exact version title, including whitespace |
+| Display and insertion | `return_format=default`, retaining source HTML for the shared processor |
+| Passage availability | Repeated `version=family\|all` for known families, `return_format=text_only` |
+
+All text requests disable segment filling. Cache public reference plans and
+compact catalog metadata, not text; passage catalogs must not be reused as
+whole-book catalogs. An omitted or failed availability answer remains unknown.
+Some available editions have incomplete coverage: align by chapter/verse,
+preserve gaps and do not substitute another edition's words. Validate the
+requested output before modifying the document.
+
+See [the migration handoff](sefaria-api-migration.md) for the full endpoint
+inventory, observed service behavior and validation boundary. Run
+`npm test` and, for relevant changes, the opt-in read-only
+`node tools/check-sefaria-v3.js` (Node 22+ and Python 3). This exercises
+production helpers against Sefaria, not Google Docs. The
+[live checklist](live-test-checklist-2.0.0.md) covers actual document insertion,
+sidebar behavior and latency.
+
+## Source commentary and notes
+
+`server/source-text.gs` owns semantic note extraction and exact-edition
+commentary profiles. `tools/sync-source-text.js` generates the identical
+client implementation at `shared/source-text.html`. Both preview and
+insertion use it. It emits escaped text and a fixed set of formatting tags;
+the existing allowlist sanitizer for other rich-content surfaces is unchanged.
+Image descriptions are plain text in both outputs; images and their URLs are
+never emitted or fetched by this processor.
+Notes are recognized by Sefaria's classes before commentary filtering, so a
+bold footnote lemma cannot erase unbold translation words. `source_notes_mode`
+(schema 32) controls Omit, Inline or a labelled Notes section. It applies to
+both source and translation; Separate creates text, not native Docs footnotes.
+
+Commentary profiles are bounded by exact edition, language and corpus:
+William Davidson English Bavli uses bold base text; Silverstein's Rashi
+Chumash and Rashi Ketuvim use bracketed additions. Unknown conventions
+preserve text and source emphasis. Brackets are processed per original segment,
+with nested brackets supported and malformed segments preserved whole.
+The [handoff](sefaria-api-migration.md) records the primary-source evidence.
+
+Sidebar option refreshes carry the selected translation and source edition,
+including ordered multiple translations. A callback rechecks its request
+ownership after rebuilding the preview; a newer edition request must not be
+overwritten by an older response. The missing-edition guard keeps insertion
+disabled until the editions required by Display have matching text. An unused
+role cannot block single-language output; switching to Both revalidates its
+required editions before making a previous partial reply insertable.
+
+## The search tabs
+
+Texts, Voices and Lexicon declare themselves in `SEARCH_TABS`
+(`sidebar/js/search-tabs`): how the tab searches, which text it suits, how
+many results a search found, what its selection holds, what a pin of one of
+its results keeps (the Session Library entry, with its `mode`) and how that
+result is found again. The shared part:
+
+- A search is a **run** (`createSearchRun`) with its own results
+  (`queryState`), corpus filter state (`resultPostProcessState`), hint and
+  loading flag. A tab has one current run; an answer for a run its tab has
+  replaced is dropped (`isCurrentSearchRun`, BUG-005).
+- Only the **shown** tab's run is drawn: its two objects *are* the globals
+  `queryState` and `resultPostProcessState`. A run in a hidden tab is processed
+  by the same `computeResultPostProcessing(mode, …)` (no DOM), with that tab's
+  preferences, so its badge count is right.
+- **Switching tabs never searches.** `setSidebarMode` calls `stashSearchTab`
+  (keeps the selection with the run) and `showSearchTab` (draws the tab's run
+  if it is for the text in the box, else offers to search it). The Texts
+  preview, versions and source card are left in the DOM while another tab is
+  shown (`resetSelectedResultView` clears them only in Texts), and fetched
+  again on return only if something changed meanwhile (`textsPreviewStale`).
+- **Enter** searches the shown tab and, in the background, every other tab
+  that suits the text and has no run for it (`prefetchOtherSearchTabs`);
+  typing searches the shown tab only.
+- A tab's "corpora" are Texts' corpora, Voices' topic categories
+  (`VOICES_TOPIC_CATALOG`) and the Lexicon's dictionaries
+  (`LEXICON_DICTIONARY_CATALOG`), each with a saved order and exclusions;
+  `getPreferenceCorpusOrder` / `getPreferenceExcludedCorpora` take the tab.
+- A Session Library entry reopens in its own tab (`openSessionEntry`): the
+  search that finds it runs there, and the entry is selected when that run
+  answers (`run.openEntry`), never after a delay.
+
+`test/tests/search-tabs.test.js`, `voices-topics.test.js` and
+`session-pins.test.js` run the real partials through
+`test/tests/helpers/sidebar-search-harness.js`.
+
 ## Storage layers
 
 1. **`UserProperties`** (account-scoped, persistent). Holds every
@@ -130,6 +253,22 @@ controls inline.
    filters, divine-name replacement choices, display mode defaults.
    Migrations live in `apps-script/migrations.gs` and run on `onOpen`
    and first sidebar load, keyed by `prefs_schema_version`.
+   Settings profiles (`server/settings-profiles.gs`) live here too, outside
+   `SETTINGS`: `settings_profiles` is the index (names, and which is in
+   use), and `settings_profile_<id>` a snapshot of each profile *not* in use.
+   The profile in use is the ordinary stored preferences, which every reader
+   reads as before; a switch keeps the outgoing values and writes the incoming
+   ones in one `setProperties`. A snapshot records its schema and is brought
+   forward through `applyMigrationsFrom_` when it comes back, so a migration
+   must work on any getProperty / setProperty / deleteProperty store.
+   Document overrides (`server/document-preferences.gs`) use a private
+   `document_preferences_<hash>` property for each Google Doc, independent of
+   the active Docs tab. They hold explicitly saved keys with a schema stamp
+   and overlay reusable defaults before sidebar session settings are applied.
+   Clone Account Settings writes a copy of the built-in User Profile and shared
+   account settings. The preview arrow only writes to the open sidebar session.
+   Preferences uses the same unsaved-edit prompt for profile switches and
+   in-dialog dismissal. The host title bar is managed by Google Docs.
 2. **`CacheService.getUserCache()`** (ephemeral, 6h max TTL). Holds
    per-session sidebar state — the in-progress selected result,
    temporary preference overrides, session-library entries. Accessed
@@ -167,16 +306,20 @@ template (head, api, feedback, state, dom, core-shared). The insertion
 options are shared by more than one entry, so they live under `shared/`
 too and know nothing about their host:
 
-- `shared/composition-card/*` — linked title, then a Source section
+- `shared/composition-card/*` — shared Notes choice (both languages), then a Source section
   (vowels, cantillation, Hebrew punctuation, font, transliteration) and a
-  Translation section (punctuation, B&I, font), each a `<details>` that folds
+  Translation section (punctuation, Commentary, font), each a `<details>` that folds
   to a summary line; `openSections` in `data-cc-features` opens them
   (Preferences). `initCompositionCard` also drives the Line #s and Citation
   pills, which sit in the insertion options' row by id. Sidebar, Preferences
   and the Link Texts dialog.
 - `shared/insertion-options/*` — the Display and Layout pickers, and the row
   under them with Line by line, Line #s and Citation
-  (`initInsertionOptions`). The sidebar's Layout tray, the Link Texts
+  (`initInsertionOptions`). Notes is in the composition card, not Layout. It also hides the card's transliteration Position
+  where it doesn't apply, and its Arrangement icons sketch the
+  transliteration's place and Line by line (`getState().transliterationOn` /
+  `transliterationPosition`; the card calls `updateInsertionOptions` after
+  each update). The sidebar's Layout tray, the Link Texts
   dialog's "Customize this insertion" panel, and Preferences. Each host
   passes its own state (`getState`) and decides what a choice does
   (`onSelectDisplay`, `onSelectLayout`): the sidebar saves it, the dialog
@@ -185,6 +328,10 @@ too and know nothing about their host:
   `hideInapplicable: false` (every default stays editable).
   `test/ui/insertion-options.test.js` fails if a page grows its own copy of
   the cards, their CSS, or their wiring.
+- `shared/surprise-me/*` — the Surprise Me form (`initSurpriseMeForm`), in
+  the sidebar's Experimental section and the Surprise Me dialog, which adds
+  Cancel. `test/ui/surprise-me-shared.test.js` fails if either grows fields
+  of its own.
 - `shared/ui/busy-overlay` — `modalBusyShow` / `modalBusyHide`: the dialogs'
   spinner overlay while a save runs (Preferences, Link Texts, first-run
   setup), in the sidebar busy overlay's colours.

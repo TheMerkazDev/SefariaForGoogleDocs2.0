@@ -9,7 +9,9 @@ initInsertionOptions({
     return {
       outputMode: $('.output-mode-selection').val(),
       layout: $('.bilingual-layout-selection').val(),
-      alignedRows: $('.wants-aligned-rows').is(':checked')
+      alignedRows: $('.wants-aligned-rows').is(':checked'),
+      transliterationOn: $('.include-transliteration').is(':checked'),
+      transliterationPosition: effectivePreferences.transliteration_position
     };
   },
   onSelectDisplay: function (mode) {
@@ -19,15 +21,14 @@ initInsertionOptions({
   onSelectLayout: function (layout) {
     $('.bilingual-layout-selection').val(layout);
     saveSidebarPreference({ bilingual_layout_default: layout });
-    if (hasResolvedReference && data && data.ref) {
-      updateSuggestion(data, selectedResultSummary ? selectedResultSummary.label : data.ref);
-    }
+    refreshSidebarLivePreview();
     if (typeof applyMultiSelectMode === 'function') applyMultiSelectMode();
   },
   onToggleAlignedRows: function () {
     var $el = $('.wants-aligned-rows');
     $el.prop('checked', !$el.is(':checked'));
     saveSidebarPreference({ bilingual_aligned_rows: $el.is(':checked') });
+    refreshSidebarLivePreview();
   }
 });
 
@@ -50,13 +51,11 @@ function updateHebrewOptionsVisibility() {
 
 function updateVersionControlsVisibility() {
   var outputMode = $('.output-mode-selection').val();
-  var hideTranslations = $('.translation-version-select option:not(:disabled)').length <= 1;
-  $('.translation-version-control').toggle(outputMode !== 'he' && appMode !== 'voices' && !hideTranslations);
-  $('.advanced-version-details').toggle(outputMode !== 'en' && appMode === 'texts');
-  $('.versions-section').toggleClass('single-translation', hideTranslations);
-  if (appMode !== 'voices' && !!selectedResultKey) {
-    $('.versions-section').toggle(!hideTranslations);
-  }
+  var showTranslations = outputMode !== 'he' && Number($('.translation-summary-count').attr('data-option-count')) > 1;
+  var showSources = outputMode !== 'en' && Number($('.hebrew-summary-count').attr('data-option-count')) > 1;
+  $('.translation-version-details').toggle(showTranslations);
+  $('.advanced-version-details').toggle(showSources);
+  $('.versions-section').toggle(appMode === 'texts' && !!selectedResultKey && (showTranslations || showSources));
 }
 
 function updateTransliterationVisibility() {

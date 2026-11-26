@@ -4,22 +4,24 @@ Five walkthroughs of the same add-on, written for five audiences. Each is a
 script to follow live in a real Google Doc — what to click, what to say, what
 should happen.
 
-> This is not an official Sefaria project.
-
 | # | Walkthrough | Audience | Length | Goal |
 | --- | --- | --- | --- | --- |
 | 1 | [Stress test](1-stress-test.md) | QA, the maintainer before release | 2–3 h | Try to break it. Surface every unexpected behaviour before Sefaria sees it. |
 | 2 | [Under the hood](2-developer.md) | Developers, Sefaria engineers | 45–60 min | What happens on the server and client for every user action. |
 | 3 | [Power user tour](3-advanced-user.md) | People who write source sheets and shiurim in Docs every week | 25–30 min | The features that save real time once you know them. |
-| 4 | [Coming from the original add-on](4-returning-user.md) | People who used the original *Sefaria for Google Docs* | 15 min | What moved, what's new, and what now behaves differently. |
+| 4 | [Coming from version 1.0](4-returning-user.md) | People who use version 1.0 of *Sefaria for Google Docs* | 15 min | Where its three commands went, what's new, and what behaves differently. |
 | 5 | [First five minutes](5-new-user.md) | Someone who has never used it | 5 min | Get one source into a document. |
 
-The version under demo is **2.1.0, preference schema 25** (`docs/VERSION.json`),
-plus the unreleased changes in `docs/CHANGELOG.md` (first-run setup and Simple
-mode, the 📰 Insertion Options panel and its settings rows, separate source and
-translation titles, citation style, three-way Vowels and Cantillation, Link
-Texts' Insert and *Customize this insertion*).
-*Help & Support → About* should read **Current line: 2.1**.
+The version under demo is **2.0.0, preference schema 34** (`docs/VERSION.json`
+and the v2.0.0 entry in `docs/CHANGELOG.md`).
+*Help → About* should read **Current line: 2.0**.
+
+**Status:** these scripts have been reconciled with the current source,
+including Texts v3, edition persistence, Commentary and Notes, the grouped
+sidebar and keyboard controls. They are not a record of a completed live
+demonstration or a video. The new Google Docs checks in the
+[live test checklist](../live-test-checklist-2.0.0.md) remain pending;
+record the deployed commit and observed results there before a launch demo.
 
 ## Before any live session
 
@@ -35,10 +37,13 @@ Texts' Insert and *Customize this insertion*).
 4. **Check that sefaria.org is up.** Every feature except Preferences calls it.
 5. Zoom the browser to 110–125 % if you are screen-sharing. The sidebar is
    300 px wide.
+6. **Record the test deployment's commit.** About's release line does not
+   establish which HEAD a test deployment runs. A passing Node suite or live
+   Sefaria API check does not prove Google Docs insertion or browser layout.
 
 ## Shared demo document
 
-Paste this into a new Google Doc titled *Torah Library demo*. Walkthroughs
+Paste this into a new Google Doc titled *Sefaria for Google Docs demo*. Walkthroughs
 2–5 use parts of it. The stress test builds a longer one.
 
 ```text

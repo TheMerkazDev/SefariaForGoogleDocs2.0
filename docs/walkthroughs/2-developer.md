@@ -69,7 +69,7 @@ attribution.gs, gematriya.gs, transliteration.gs   pure, Node-testable helpers
    never overwrites one. `menu_layout` is deliberately left unset, so the user
    keeps tracking the code's default menu.
 2. `runUserPreferenceMigrationsIfNeeded_()` reads `prefs_schema_version` and
-   runs every `migrateToV<N>_` with `from < N`, then stamps `25`
+   runs every `migrateToV<N>_` with `from < N`, then stamps `30`
    (`PREFS_SCHEMA_CURRENT_`). Each migration only fills keys that are absent,
    or rewrites a value whose meaning changed (v24's old `teamim_filter =
    "torah"`, which meant Tanakh only, becomes `"tanakh"`).
@@ -109,13 +109,13 @@ Both load the real `.gs` into a `vm` context with fake `PropertiesService` and
 
 ## 2. Open the sidebar (5 min)
 
-**Do:** Extensions → Torah Library → **Texts**.
+**Do:** Extensions → Sefaria for Google Docs → **Texts**.
 
 **What runs:**
 
 1. `textsHTML()` → `openSharedSidebar_('texts')` (`server/menu.gs`).
 2. `HtmlService.createTemplateFromFile('sidebar')` evaluates `sidebar.html`,
-   which `include()`s 41 partials: `shared/ui/head` (CSP, jQuery with
+   which composes its partials with `include()`: `shared/ui/head` (CSP, jQuery with
    SRI), `css/tokens`, `sidebar/js/*`. `template.uiMode = getUiMode_()` lands
    on `<main data-ui-mode="simple|full">`. Server data is embedded as
    `appConfigJson = toEmbeddedJson_(getUiAppConfig_(…))` (`ui_core.gs`). Any
@@ -134,7 +134,12 @@ Both load the real `.gs` into a `vm` context with fake `PropertiesService` and
    - **Sidebar session overrides:** `CacheService.getUserCache()`, keyed by
      `sessionId`, with a 6-hour TTL (`setSidebarSessionState`). The
      Insertion Options tray (`#layout-tray`, opened by `#open-layout-settings`)
-     writes here. **💾 Save as defaults** copies session into account
+     writes here. Its sidebar-only grouping moves the existing controls once
+     (`initGroupedInsertionOptions` in `shared/insertion-options/js.html`),
+     without cloning controls or changing values. Primary Line by line and
+     Transliteration stay outside the three details groups; closing a group
+     makes no RPC. Preferences and Link Texts keep the detailed Source and
+     Translation sections. **💾 Save as defaults** copies session into account
      (`saveSidebarSessionAsAccountDefaults`).
    - Session saves go **one at a time** (`saveSessionPreference` →
      `flushSessionSaves_`, `sidebar/js/preferences-state.html`).
@@ -155,9 +160,17 @@ Both load the real `.gs` into a `vm` context with fake `PropertiesService` and
      (section 6). They are never stored unless the user clicks **💾 Save as
      defaults**, which calls `setPreferences`.
 5. **Simple mode is CSS only.** `css/components/simple-mode.html` hides the
-   result sort, Restore Corpus and (in Texts) the Texts / Voices / Lexicon
-   switch under `[data-ui-mode="simple"]`; nothing leaves the DOM, so selector
-   contracts and event bindings are the same in both modes. The menu side is
+   result sort, Restore Corpus and the 🧪 tab under `[data-ui-mode="simple"]`;
+   the Texts / Voices / Lexicon tabs stay. Nothing leaves the DOM, so selector
+   contracts and event bindings are the same in both modes.
+   **Preferences → Sidebar** works the same way, in either mode: the server
+   prints what is switched off onto `<main>` before it paints
+   (`data-sidebar-tabs`, `data-quick-actions-hidden`, `data-options-hidden`,
+   from `show_voices_tab` / `show_lexicon_tab` and the two `*_hidden` lists,
+   schema 29), and CSS hides it. Junk in a stored list hides nothing; a
+   hidden Insertion Options control keeps its effective value, including an
+   existing session override; visibility does not rewrite preferences
+   (`test/tests/sidebar-controls.test.js`, `test/ui/sidebar-controls-ui.test.js`). The menu side is
    `getSimpleMenuLayout_()` (the default layout with `SIMPLE_MENU_HIDDEN_`
    hidden); `planUiModeSwitch_()` keeps the user's own layout in
    `menu_layout_before_simple` and puts it back on the way to Everything.
@@ -197,20 +210,39 @@ Executions page (`getSidebarBootstrapData`, `returnTitles`).
      marks stripped, then **citation-abbreviation expansions**
      (`server/citation-abbreviations.gs`: `Hil.` → `Mishneh Torah, Hilchot`).
      An expansion may only **add** words. Dropping one could quietly point the
-     query at a different work that really exists. Each candidate is a
-     `GET /api/texts/{ref}?commentary=0&context=0`.
+     query at a different work that really exists. Ref metadata from
+     `GET /api/ref/{ref}` first validates and bounds a candidate; content
+     comes from `GET /api/v3/texts/{ref}`. A bare book is resolved to a
+     bounded first section before text is requested. Display requests use
+     repeated `version` selectors, `fill_in_missing_segments=0` and
+     `return_format=default`.
    - `findSearchAdvanced(q, …)`: full text,
      `POST /api/search-wrapper/es8` (`server/search.gs`).
 3. Results are grouped: library matches, then search results, then **Close
    matches** (a token-overlap and edit-distance pass over the title list).
    Close matches are never opened automatically.
-4. Everything that renders Sefaria HTML goes through `sanitizeSourceHtml`
-   (`shared/ui/dom.html`). It's an **allowlist** (inline typography only), and
-   its output is re-parsed and must come back the same, or the caller gets
-   escaped text. It replaced a blocklist that mutation XSS got past
-   (`<math><mi><table><mglyph><xmp>…`). The Node tests use linkedom, which
-   can't reproduce parser mutations, so sanitizer changes are also checked in
-   headless Chromium.
+4. Texts preview uses the shared source processor (`server/source-text.gs`,
+   generated into `shared/source-text.html`). It escapes all text and emits
+   only its own inline formatting tags. Other rich-content surfaces use
+   `sanitizeSourceHtml` (`shared/ui/dom.html`), an **allowlist** whose output
+   is re-parsed and checked. It replaced a blocklist that mutation XSS got
+   past (`<math><mi><table><mglyph><xmp>…`). Node's linkedom cannot reproduce
+   browser parser mutations; sanitizer changes require a real browser check.
+
+V3 returns fetched content in `versions[]` and the picker catalog in
+`available_versions`. The adapter keeps those distinct, preserves nested
+segment positions, validates the returned reference and work, and carries
+exact edition metadata into credit and commentary processing. The Versions
+metadata route remains `/api/texts/versions/{indexTitle}`; it is not a v1
+passage request. Search, sheets, dictionaries and citation detection keep
+their own current endpoints. See the [migration handoff](../sefaria-api-migration.md).
+
+**Show the contract check:** after `npm ci` and `npm test`, run
+`node tools/check-sefaria-v3.js` with Node 22+ and Python 3. It is an opt-in,
+read-only check of the production helpers against live Sefaria; append
+`commentary` to focus on source annotations, or another case-name substring
+to select cases. Record the observed result and date. A green API run is not
+a Google Docs test; use the live checklist for sidebar and document behavior.
 
 **Show:** `test/tests/search-input-normalization.test.js`,
 `citation-abbreviations.test.js`, `sanitize-source-html.test.js`, and the
@@ -235,15 +267,19 @@ later. The **server** then applies, in order, `attachTransliterationSource_`
 Off / Tanakh / On, `teamim` / `teamim_filter` for Cantillation Off / Tanakh /
 Torah), `applyPunctuationPreferences`, `applyHebrewDivineNamePreferences` and
 `applyEnglishDivineNamePreference` (`server/text-processing.gs`) before
-returning. So the preview is exactly what will be inserted.
+returning. Preview and insertion then use the same commentary and note rules;
+Google Docs handles the final font, generated numbers and page layout.
 
 A change in the tray that the fetch applies (Vowels, Cantillation, either
 Punctuation, Transliteration) calls `scheduleSelectedResultRefresh()`
 (`sidebar/js/composition-controls.html`): Add Source is disabled and the
 preview says *Updating preview…* at once, and the one re-fetch waits until
 the clicks stop and the session saves have landed
-(`test/tests/sidebar-session-fetch.test.js`). The original
-add-on made the same choice, and the comment in `findReference` still says why.
+(`test/tests/sidebar-session-fetch.test.js`). The selected translation, source
+edition and multi-selection order are captured from the current picker state.
+Request generations reject late replies, including a reply for the same
+reference with older transliteration settings. A missing edition preserves
+the pickers and disables insertion; a transport failure gets its own message.
 
 Divine-name rules are a config table (`allRules` in `text-processing.gs`).
 Each rule has an `enabledBy` key, a Unicode-aware pattern that treats
@@ -256,9 +292,10 @@ still match with a prefix. See `test/tests/divine-name-rules.test.js`.
 ## 5. Insert (10 min)
 
 **Do:** in **📰 Insertion Options**, Display **A + א**, Arrangement
-**Right–Left**, **Line numbers** on, and both **Link title to Sefaria**
-switches on (Source section: `insert_hebrew_sefaria_link_default`;
-Translation section: `insert_sefaria_link_default`). Click **Add Source**.
+**Hebrew right**. In **References and numbering**, turn **Line numbers**,
+**Link source title** (`insert_hebrew_sefaria_link_default`) and
+**Link translation title** (`insert_sefaria_link_default`) on. Click
+**Add Source**.
 Then select three translations with the Stacked arrangement and insert again.
 
 **Single insert:** `google.script.run.insertReference(data, opts)`
@@ -281,10 +318,14 @@ got inserted. While it runs the sidebar shows its busy overlay
    used to insert into the body at an index that belonged to the cursor's own
    parent, which is how a table insert ended up somewhere unrelated
    (regression log).
-3. **Layout:** Stacked is paragraphs. Right–Left and Left–Right are a 2-column
+3. **Layout:** Stacked is paragraphs. Hebrew right and Hebrew left are a 2-column
    table with the Hebrew paragraphs set RTL, which is how the original add-on
-   did it. **Line by line** (`bilingual_aligned_rows`) gives each verse its
-   own row instead (`aligned-rows.test.js`).
+   did it; a third column when the transliteration has one of its own
+   (`transliteration_position` "left" / "right", schema 30). **Line by line**
+   (`bilingual_aligned_rows`) gives each verse its own row instead, and in
+   Stacked puts each verse, its transliteration and its translation one
+   after another (`insertInterleavedLines_`, inserted last first so every
+   line follows the titles' formatting; `aligned-rows.test.js`).
 4. **Typography:** `getTypographySettings()` (`server/preferences.gs`)
    resolves each role: `sourceTitle` and `sefariaLink` (the translation
    title, plain and linked), `hebrewTitle` and `hebrewLink` (the source
@@ -296,18 +337,22 @@ got inserted. While it runs the sidebar shows its busy overlay
    reads the paragraph at the insertion point, or the nearest body-text
    paragraph above it. All styling goes through `applyRoleTypography_(paragraph,
    typography, role, overrides)`.
-5. **Rich text and emphasis:** `insertRichTextFromHTML` turns Sefaria's `<b>`,
-   `<i>`, `<sup>` and entities into Docs runs. `decodeHTMLEntities`
-   (`server/utils.gs`) is a single-pass table decoder, which fixed the literal
-   `&thinsp;` bug. Then `captureEmphasisRuns_` → the baseline style →
-   re-assert, mapped through the user's emphasis settings
-   (`applyEmphasisMapping_`). Without this, the Steinsaltz Talmud loses the
-   bold that marks the Talmud's own words. `source_emphasis_mode` (schema 14;
-   the card's **Bold & italics** Keep / Drop / Only) picks **keep**,
-   **discard**, or **only**, which first removes the text the source didn't
-   emphasise (`planEmphasisOnlyEdits_`). It applies to the translation only:
-   `sourceEmphasisModeForRole_` returns `keep` for every other role, so the
-   Hebrew is always inserted whole.
+5. **Rich text, commentary and notes:** `insertRichTextFromHTML` consumes
+   `processSourceText_`, the same processor used by preview. It emits text
+   and UTF-16 formatting runs for bold, italics, superscript and subscript.
+   `source_emphasis_mode` maps Default / Combine / Drop to **keep**,
+   **discard**, or **only**, but filtering requires a verified exact edition,
+   language and corpus: Davidson English Bavli uses bold base text;
+   Silverstein's Rashi Chumash and Ketuvim use brackets. Bracket filtering
+   happens per original verse before joining; malformed segments and unknown
+   editions keep their words. Source/Hebrew text is never commentary-filtered.
+   Semantic `sup.footnote-marker` / `i.footnote` notes are extracted before
+   filtering and rendered afterwards according to `source_notes_mode`
+   (Omit / Inline / Separate, default Omit; added in schema 32). Bold inside a
+   note cannot become the surviving main text. Typography preserves the
+   processed runs and does not apply Drop a second time. Transliteration
+   reads the main Hebrew without marked notes. Regenerate the client copy
+   with `node tools/sync-source-text.js` after a processor change.
 6. **Hebrew marks the font lacks:** last of all, `applyRoleTypography_` asks
    `planHebrewMarkFallback_` (`server/hebrew-fonts.gs`) which marks the
    font (or, on *Match the document*, the document's font) has no glyph for,
@@ -319,18 +364,25 @@ got inserted. While it runs the sidebar shows its busy overlay
    Apps Script and in Node. It credits the translation version and license and
    the Hebrew edition and its `heLicense`, and prints no empty lines.
 
-**Multi-translation:** `insertReferenceVersions(ref, opts)` fetches one
-`/api/texts` per version. Each result is checked with `selectInsertableVersions_`,
-because Sefaria **substitutes the default version** when you ask for one that
-doesn't cover the ref, and can return empty text. Mismatches are skipped and
-reported, not inserted. (`docs/pre-upstream-review.md` §1.2 explains why moving
-to `/api/v3/texts` would reduce this to one request, and why that isn't a
-simple URL change.)
+**Multi-translation:** `insertReferenceVersions(ref, opts)` still fetches each
+chosen translation separately through the v3 adapter; moving endpoints did
+not batch those requests into one. Each result is checked with
+`selectInsertableVersions_`; unavailable translations are skipped and
+reported. If the selected Hebrew edition is required and missing, the entire
+operation stops before document writes. Edition gaps are not filled from
+other editions. Exact titles, including significant whitespace, survive.
+
+**Request cost:** Ref planning adds requests on a cold reference; an exact
+edition may also need the Versions catalog. Compact metadata is cached for
+up to six hours, while text remains fresh. Availability can fetch all catalog
+families' versions for the passage. Test long ranges, cold loads and several
+translations in Apps Script; a local API test does not establish production
+latency or quota headroom.
 
 **Show:** `test/tests/multi-version-insert.test.js`,
 `typography-defaults.test.js`, `format-data-for-pesukim.test.js`. **Be
 upfront:** nothing here can test `DocumentApp` itself. The Node suite covers
-the pure parts, and `docs/live-test-checklist-2.1.0.md` covers the rest by
+the pure parts, and `docs/live-test-checklist-2.0.0.md` covers the rest by
 hand.
 
 ---
@@ -368,12 +420,21 @@ most time.
    lets the review table show excerpts without a request per row.
 5. `classifyLinkerMatches_` is pure and unit-tested. Each raw match becomes
    exactly one of: **linked** (one ref), **ambiguous** (several refs, kept in
-   Sefaria's order and never re-ranked), **unresolved** (`linkFailed` or no
-   refs), **unplaceable** (resolved, but it spans two pre-filter windows, so no
-   single run of document text holds it; the fix is Whole document mode), or
-   **skipped** (already hyperlinked, and not counted as a failure). The
-   original add-on linked `refs[0]` of ambiguous matches and reported only
-   successes.
+   Sefaria's order and never re-ranked), **unmatched** (`linkFailed` or no
+   refs; kept with its text and snippet), **unplaceable** (it spans two
+   pre-filter windows, so no single run of document text holds it; the fix is
+   Whole document mode), or **skipped** (already hyperlinked, matched or not,
+   and not counted as a failure). The original add-on linked `refs[0]` of
+   ambiguous matches and reported only successes.
+   `recoverUnmatchedCitations_` then looks each unmatched citation up again
+   with `buildReferenceVariants_` (`server/sefaria-fetch.gs`), the spellings
+   the sidebar search tries, in the same order, one `UrlFetchApp.fetchAll`
+   round per spelling, at most 30 citations. A hit becomes a single-source
+   match with `recoveredFrom`; the rest go to the report's `unmatched` with
+   the spellings tried and a `reason` (`out-of-range`, `unknown-title`,
+   `refers-back`, `not-found`, `unavailable`, `not-checked`), which the
+   dialog's collapsed "Not matched" list shows. Pinned by
+   `test/tests/linker-retry.test.js`.
 6. **Apply:** each match carries `occurrence` (which occurrence of its exact
    text it is). `applyLinkerDecisions(json)` re-finds that occurrence in the
    document as it is now (`relocateLinkerDecision_`), so an edit made while
@@ -412,13 +473,24 @@ and the offset mapping) and `linker-classify.test.js`.
 - `setPreferences(obj)` only stores keys listed in `SETTINGS`, as strings of
   at most 9,000 characters (`test/tests/set-preferences.test.js`). Any iframe
   can call any server function, so the server can't trust the client.
-- `getPreferences()` / `getAccountPreferences()` read the same list back.
-- Menu changes (the Menu Bar tab) take effect on the next `onOpen`, so the
-  user has to reload the Doc.
-- Every save covers the dialog with `modalBusyShow('Saving preferences…')`
-  until the server answers, so a slow round trip no longer looks like a hang.
-  Opening Preferences from the sidebar shows *Opening Preferences…*
-  (`showBusyOverlay('preferences')`) and ignores repeat clicks.
+- `getAccountPreferences()` reads reusable defaults. `getPreferences()`
+  adds the current Google Doc’s private overrides. The sidebar adds its own
+  temporary session choices on top.
+- **💾 Save** sends edited fields and writes them to the selected scope.
+  The busy overlay stays up until the server answers. Save & Close waits
+  for success, and the add-on’s ✕ or Escape uses the profile-switch prompt
+  for unsaved edits.
+- **Settings files** (`server/settings-file.gs`, Preferences → Details →
+  Import/Export ⇅) can target a reusable profile. Imports validate settings
+  and write only the changes in checked groups (`settings-file.test.js`).
+- **Profiles** (`server/settings-profiles.gs`, both interfaces) store the
+  reusable profile in use in ordinary user preferences. Inactive snapshots
+  use `settings_profile_<id>` and a separate index, preserving existing
+  profiles and snapshots when the built-in User Profile label changes.
+- **This Document** (`server/document-preferences.gs`) keys overrides to the
+  hashed Doc ID. The writer checks the Doc and locks updates. The Clone
+  action copies the fixed User Profile and shared preferences, even with
+  a different reusable profile in use (`settings-profiles.test.js`).
 
 ---
 
@@ -426,16 +498,24 @@ and the offset mapping) and `linker-classify.test.js`.
 
 | Feature | Endpoint | Note |
 | --- | --- | --- |
-| Voices search | `POST /api/search/sheet/_search` | Raw Elasticsearch DSL through an nginx allowlist. **Not a documented API**, and the most fragile dependency (`pre-upstream-review.md` §1.4). A good question to raise with Sefaria. |
+| Voices search | `POST /api/search/sheet/_search` | Raw Elasticsearch DSL through an nginx allowlist. **Not a documented API**, and the most fragile dependency (`pre-upstream-review.md` §1.4). A good question to raise with Sefaria. Each sheet is filed client-side under the first of its topics that fits a category (`voices-topics.test.js`). |
 | Sheet contents | `GET /api/sheets/{id}` | Sheets are user-generated. Every URL written into the Doc goes through `safeLinkUrl_` (http, https and mailto only). |
-| Lexicon | `GET /api/words/{word}`, plus the search wrapper for English reverse lookup | `server/lexicon.gs` |
+| Lexicon | `GET /api/words/{word}`, plus the search wrapper filtered to `Reference/Dictionary` for English reverse lookup | `server/lexicon.gs` groups Sefaria's flat entry list into words by headword spelling and reads each dictionary's gloss its own way (`lexicon-words.test.js`, fixtures from Sefaria's real answers). |
+
+The three tabs share one search workflow (`sidebar/js/search-tabs.html`): a
+`SEARCH_TABS` entry per tab (`suits`, `search`, `count`, selection capture and
+restore), one search run per tab and text, and an answer to an earlier run is
+dropped. Typing searches the shown tab; Enter also searches each other tab
+that is switched on and whose `suits(query)` accepts the text; switching tabs
+never searches (`search-tabs.test.js`, which runs the real partials through
+`test/tests/helpers/sidebar-search-harness.js`).
 
 ---
 
 ## 9. Guardrails and shipping (5 min)
 
 ```bash
-npm ci && npm test                 # 459 passing, 0 skipped (skipped > 0 = linkedom missing = red)
+npm ci && npm test                 # 0 failing, 0 skipped; CLAUDE.md has the passing count (skipped > 0 = linkedom missing = red)
 bash pre_clasp_qc.sh apps-script   # must exit 0
 npx --prefix tools/clasp clasp push  # HEAD only: test deployments, not users
 ```
@@ -453,7 +533,7 @@ What guards what:
 
 **Releasing:** `clasp push` updates HEAD, which only test deployments run.
 Users run the numbered version selected in Marketplace SDK → App
-Configuration. So a release means: live-test HEAD, `clasp version "v2.1.0"`,
+Configuration. So a release means: live-test HEAD, `clasp version "v2.0.0"`,
 then set that number in the SDK.
 
 ---
@@ -473,9 +553,12 @@ then set that number in the SDK.
 
 ## Questions Sefaria reviewers are likely to ask
 
-- *Why v1 `/api/texts` and not v3?* It works and is maintained. Moving to v3
-  is a real refactor (string `sections`, a `versions[]` shape), planned behind
-  an adapter after the upstream merge. `pre-upstream-review.md` §1.2.
+- *Why do some routes still have no `/v3/`?* Passage content is entirely on
+  Texts v3; API versions belong to individual operations. Ref, the Versions
+  catalog, search, sheets, dictionaries and the linker retain their current
+  endpoints. There is no v1 content fallback. The
+  [migration handoff](../sefaria-api-migration.md) records the endpoint audit
+  and the API behavior the adapter protects against.
 - *Why the raw sheet search proxy?* No documented sheet-search API exists. A
   supported one would be welcome.
 - *What do you send?* What the user typed; plus, for the linker only, the
@@ -483,3 +566,5 @@ then set that number in the SDK.
 - *What's stored?* Preferences in `UserProperties`, sidebar state in the user
   cache for 6 hours, and the Session Library in the browser. No credentials,
   no analytics.
+
+**Settings transfer contract:** the new target-aware RPCs validate current mode and active profile identity. They export or update the chosen profile without activating it; inactive profile snapshots are built and size-checked before writes. Shared menu/search/linking settings remain global and are optional for Everything transfers. Import never changes the current interface mode. The older settings-file RPCs retain their compatibility signatures. Run the settings-file, settings-profiles and first-run regression tests, then the live Preferences transfer checklist.

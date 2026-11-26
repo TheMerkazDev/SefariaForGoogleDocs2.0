@@ -80,7 +80,9 @@ function firstRunAnswersFromPreferences_(prefs) {
     teamim: p.teamim !== 'false',
     divine: divine,
     language: String(p.preferred_translation_language || 'en'),
-    uiMode: normalizeUiMode_(p.ui_mode)
+    uiMode: normalizeUiMode_(p.ui_mode),
+    voices: String(p.show_voices_tab) !== 'false',
+    lexicon: String(p.show_lexicon_tab) !== 'false'
   };
 }
 
@@ -142,8 +144,59 @@ function planFirstRunPreferences_(answers, prefs) {
 
   if (typeof a.language === 'string' && /^[a-z]{2,3}$/.test(a.language)) set('preferred_translation_language', a.language);
 
+  if (typeof a.voices === 'boolean') set('show_voices_tab', String(a.voices));
+  if (typeof a.lexicon === 'boolean') set('show_lexicon_tab', String(a.lexicon));
   var uiMode = FIRST_RUN_UI_MODES_.indexOf(a.uiMode) >= 0 ? a.uiMode : null;
   return { changes: changes, uiMode: uiMode };
+}
+
+/**
+ * What Preferences → Reset To Defaults stores: every setting's default, and
+ * the menu that goes with the interface mode in use (the Simple menu in
+ * Simple mode), so a reset in Simple mode does not leave the full menu under
+ * the Simple interface. The interface mode itself is not a setting and stays.
+ *
+ * @param {Object} defaults  getDefaultPreferences()
+ * @param {string} uiMode    the stored ui_mode
+ * @return {Object<string,*>} values for setPreferences (SETTINGS keys only)
+ */
+function planPreferenceReset_(defaults, uiMode) {
+  var values = {};
+  SETTINGS.forEach(function (key) {
+    if (defaults[key] !== undefined) values[key] = defaults[key];
+  });
+  if (normalizeUiMode_(uiMode) === 'simple') values.menu_layout = getSimpleMenuLayoutJson_();
+  return values;
+}
+
+// Stored keys that record what someone last did, not a choice they made:
+// they change on their own as the sidebar is used.
+var FIRST_RUN_NOT_A_CHOICE_ = ['last_translation_languages', 'last_translation_only_filter',
+  'last_search_sort_mode', 'last_search_relevance_sort', 'search_mode'];
+
+/**
+ * Whether setup should offer "Keep my settings as they are": only to someone
+ * who has settings of their own to keep. At install nobody does — onInstall
+ * seeds the defaults, and the add-on people come from (Sefaria for Google
+ * Docs) is separate and stores none — so a first-run setup never offers it.
+ * It is offered when setup was finished or dismissed before (Help → Run setup
+ * again), or when a stored setting differs from its default, which covers a
+ * future upgrade that sets `first_run_setup` back to "pending" to show setup
+ * again to people who already chose things.
+ *
+ * @param {Object} stored    stored values (strings), `first_run_setup` and the keys
+ * @param {Object} defaults  getDefaultPreferences()
+ * @param {string[]} keys    the setting keys to compare (SETTINGS)
+ */
+function firstRunHasSavedSettings_(stored, defaults, keys) {
+  var s = stored || {};
+  if (s.first_run_setup === 'done') return true;
+  return (keys || []).some(function (key) {
+    if (FIRST_RUN_NOT_A_CHOICE_.indexOf(key) >= 0) return false;
+    var value = s[key];
+    if (value == null || defaults[key] === undefined) return false;
+    return String(value) !== String(defaults[key]);
+  });
 }
 
 function menuLayoutsEqual_(a, b) {
@@ -222,7 +275,7 @@ function readStoredPreferences_(keys) {
 
 function firstRunPreferenceKeys_() {
   var keys = ['output_mode_default', 'bilingual_layout_default', 'nekudot', 'nekudot_filter', 'teamim',
-    'apply_sheimot_on_insertion', 'preferred_translation_language', 'ui_mode'];
+    'apply_sheimot_on_insertion', 'preferred_translation_language', 'ui_mode', 'show_voices_tab', 'show_lexicon_tab'];
   FIRST_RUN_DIVINE_NAMES_.forEach(function (name) { keys.push(name.on, name.text); });
   return keys;
 }
@@ -243,15 +296,32 @@ function rebuildMenuQuietly_() {
   }
 }
 
-function showFirstRunSetup_() {
+// Never stops setup from opening: if the settings can't be compared, only a
+// finished or dismissed setup counts.
+function readHasSavedSettings_() {
+  try {
+    var all = PropertiesService.getUserProperties().getProperties() || {};
+    return firstRunHasSavedSettings_(all, getDefaultPreferences(), SETTINGS);
+  } catch (error) {
+    try {
+      return PropertiesService.getUserProperties().getProperty('first_run_setup') === 'done';
+    } catch (ignored) {
+      return false;
+    }
+  }
+}
+
+function showFirstRunSetup_(rerun) {
   var template = HtmlService.createTemplateFromFile('first-run-setup');
   template.appConfigJson = toEmbeddedJson_(getUiAppConfig_('first-run-setup', 'setup', {
-    answers: firstRunAnswersFromPreferences_(readStoredPreferences_(firstRunPreferenceKeys_()))
+    answers: firstRunAnswersFromPreferences_(readStoredPreferences_(firstRunPreferenceKeys_())),
+    hasSavedSettings: readHasSavedSettings_(),
+    rerun: rerun === true
   }));
   var output = template.evaluate()
     .setWidth(640)
     .setHeight(680);
-  DocumentApp.getUi().showModalDialog(output, 'Welcome to Torah Library');
+  DocumentApp.getUi().showModalDialog(output, 'Welcome to Sefaria for Google Docs');
 }
 
 /**
@@ -268,9 +338,49 @@ function maybeShowFirstRunSetup_() {
   return true;
 }
 
-/** Help → "Run setup again". */
+/** Help → Re-run Setup Wizard. No preferences change until an explicit choice. */
 function openFirstRunSetup() {
-  showFirstRunSetup_();
+  showFirstRunSetup_(true);
+}
+
+// Reset active settings, not named profile snapshots, schema or upload consent.
+// On a fresh install these values are seeded from the same canonical defaults.
+function resetActiveSetupPreferences_(legacy) {
+  var defaults = getDefaultPreferences();
+  var values = planPreferenceReset_(defaults, 'full');
+  values.ui_mode = 'full';
+  values.menu_layout_before_simple = '';
+  values.search_mode = 'texts';
+  values.first_run_setup = 'done';
+  if (legacy) {
+    // The documented v1 look and workflows, with current attribution and
+    // privacy safeguards retained. No automatic divine-name substitution.
+    values.output_mode_default = 'both';
+    values.bilingual_layout_default = 'he-right';
+    values.bilingual_aligned_rows = false;
+    values.apply_sheimot_on_insertion = false;
+    values.show_voices_tab = false;
+    values.show_lexicon_tab = false;
+    values.linker_review_mode = 'quiet';
+    values.include_transliteration_default = false;
+    values.ui_mode = 'simple';
+    values.menu_layout = getSimpleMenuLayoutJson_();
+  }
+  var props = PropertiesService.getUserProperties();
+  var strings = {};
+  Object.keys(values).forEach(function (key) { strings[key] = String(values[key]); });
+  props.setProperties(strings);
+  rebuildMenuQuietly_();
+}
+
+// Called only after an explicit reset/keep choice in the restart screen.
+function restartFirstRunSetup(choice) {
+  if (choice !== 'keep' && choice !== 'reset') throw new Error('Choose whether to keep or reset preferences.');
+  if (choice === 'reset') resetActiveSetupPreferences_(false);
+  return {
+    answers: firstRunAnswersFromPreferences_(readStoredPreferences_(firstRunPreferenceKeys_())),
+    hasSavedSettings: choice === 'keep'
+  };
 }
 
 /**
@@ -284,6 +394,10 @@ function completeFirstRunSetup(answersJson) {
     answers = typeof answersJson === 'string' ? JSON.parse(answersJson) : (answersJson || {});
   } catch (error) {
     answers = {};
+  }
+  if (answers && answers.legacyPreset === true) {
+    resetActiveSetupPreferences_(true);
+    return { uiMode: getUiMode_() };
   }
   var userProperties = PropertiesService.getUserProperties();
   var plan = planFirstRunPreferences_(answers, readStoredPreferences_(firstRunPreferenceKeys_()));
@@ -305,6 +419,21 @@ function setUiMode(mode) {
   return {
     uiMode: getUiMode_(),
     menuLayout: PropertiesService.getUserProperties().getProperty('menu_layout') || '',
+    documentMenuLayout: typeof documentPreferencesKey_ === 'function' ? snapshotProperties_().getProperty('menu_layout') || '' : undefined,
     menuKept: plan.menuKept
   };
+}
+
+/**
+ * Preferences → Reset To Defaults. Writes planPreferenceReset_, and clears the
+ * menu kept aside for leaving Simple mode, so one menu is left, not the
+ * Simple one and a kept one that would come back on switching to Everything.
+ * Rebuilds the menu at once (it used to change only on the next open).
+ * @return {Object} the stored preferences, as getPreferences returns them
+ */
+function resetPreferencesToDefaults() {
+  setPreferences(planPreferenceReset_(getDefaultPreferences(), getUiMode_()));
+  PropertiesService.getUserProperties().setProperty('menu_layout_before_simple', '');
+  rebuildMenuQuietly_();
+  return getAccountPreferences();
 }

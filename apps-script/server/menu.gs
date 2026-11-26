@@ -15,7 +15,9 @@ Licensed under the MIT License. See repository LICENSE.md.
 function buildAndInstallMenu() {
   const prefs = getPreferences();
   const plan = planMenuFromLayout_(prefs.menu_layout, {
-    surpriseMeEnabled: DEV_FLAGS.SURPRISE_ME && prefs.surprise_me_enabled == "true"
+    surpriseMeEnabled: DEV_FLAGS.SURPRISE_ME && prefs.surprise_me_enabled == "true",
+    voicesEnabled: String(prefs.show_voices_tab) !== "false",
+    lexiconEnabled: String(prefs.show_lexicon_tab) !== "false"
   });
   installMenuPlan_(plan);
 }
@@ -53,12 +55,27 @@ function getSearchMode_() {
   return (stored === 'voices' || stored === 'experimental' || stored === 'lexicon') ? stored : 'texts';
 }
 
+function sidebarPreferencesConfig_() {
+  let scope = '';
+  try {
+    const identity = selectionDocumentIdentity_(DocumentApp.getActiveDocument());
+    if (identity.documentId) scope = selectionTextHash_(identity.documentId + ':' + identity.tabId);
+  } catch (error) { /* No sidebar hand-off outside a document. */ }
+  return { sidebarPreferenceScope: scope, sidebarPreferenceKeys: settingsProfileKeys_() };
+}
+
 function openSharedSidebar_(mode, options) {
-  var resolvedMode = setSearchMode_(mode || getSearchMode_());
+  var controls = getSidebarControls_();
+  var resolvedMode = setSearchMode_(resolveSidebarOpenMode_(mode || null, getSearchMode_(), controls.tabs));
   var template = HtmlService.createTemplateFromFile('sidebar');
   template.initialMode = resolvedMode;
   template.uiMode = getUiMode_();
-  var extra = (options && typeof options === 'object') ? options : {};
+  // Preferences → Sidebar, printed into the root's data attributes, so a
+  // switched-off tab or hidden button is never painted.
+  template.sidebarTabs = controls.tabs.join(' ');
+  template.quickActionsHidden = controls.quickActionsHidden.join(' ');
+  template.optionsHidden = controls.optionsHidden.join(' ');
+  var extra = Object.assign(sidebarPreferencesConfig_(), options || {});
   template.appConfigJson = toEmbeddedJson_(getUiAppConfig_('sidebar', resolvedMode, extra));
   var output = template.evaluate()
     .setTitle('Sefaria')
@@ -103,32 +120,13 @@ function lexiconHTML() {
 
 function quickActionsHTML() {
   var selectionText = '';
-  try {
-    var doc = DocumentApp.getActiveDocument();
-    var selection = doc.getSelection();
-    if (selection) {
-      var rangeElements = selection.getRangeElements();
-      for (var i = 0; i < rangeElements.length; i++) {
-        var re = rangeElements[i];
-        var el = re.getElement();
-        if (el.getType && el.getType() === DocumentApp.ElementType.TEXT) {
-          var textEl = el.asText();
-          if (re.isPartial()) {
-            selectionText += textEl.getText().substring(re.getStartOffset(), re.getEndOffsetInclusive() + 1);
-          } else {
-            selectionText += textEl.getText();
-          }
-        }
-      }
-    }
-  } catch (e) {}
-  selectionText = String(selectionText || '').trim();
+  try { selectionText = selectedPlainText_(DocumentApp.getActiveDocument().getSelection()).trim(); } catch (e) {}
   openSharedSidebar_('texts', { initialQuery: selectionText || null, openActionsPanel: true });
 }
 
 function getSidebarBootstrapData(mode, sessionId) {
   runUserPreferenceMigrationsIfNeeded_();
-  const accountPreferences = getAccountPreferences();
+  const accountPreferences = getPreferences();
   const resolvedMode = (mode === 'voices' || mode === 'experimental' || mode === 'texts' || mode === 'lexicon') ? mode : getSearchMode_();
   const resolvedSessionId = sessionId || generateSidebarSessionId_();
   const sessionState = resolvedMode === 'texts' ? getSidebarSessionState(resolvedSessionId) : {};
@@ -143,12 +141,16 @@ function getSidebarBootstrapData(mode, sessionId) {
   };
 }
 
-function openHelpModal() {
-  const html = HtmlService.createHtmlOutputFromFile('help-modal')
-      .setWidth(760)
-      .setHeight(860);
-  DocumentApp.getUi().showModalDialog(html, 'Help & Support');
+function openHelpTab_(tab) {
+  const template = HtmlService.createTemplateFromFile('help-modal');
+  template.helpTabJson = toEmbeddedJson_(['help-tab', 'support-tab', 'about-tab'].indexOf(tab) >= 0 ? tab : 'help-tab');
+  const html = template.evaluate().setWidth(760).setHeight(860);
+  DocumentApp.getUi().showModalDialog(html, 'Help');
 }
+
+function openHelpModal() { openHelpTab_('help-tab'); }
+function openSupportModal() { openHelpTab_('support-tab'); }
+function openAboutModal() { openHelpTab_('about-tab'); }
 
 function openFeedbackModal() {
   const html = HtmlService.createHtmlOutputFromFile('feedback-modal')
@@ -199,20 +201,7 @@ function getGematriyaStats_() {
 
   if (selection) {
     hasSelection = true;
-    const elements = selection.getRangeElements();
-    for (const elem of elements) {
-      const el = elem.getElement();
-      if (el.getType() === DocumentApp.ElementType.TEXT) {
-        const textEl = el.asText();
-        if (elem.isPartial()) {
-          rawText += textEl.getText().substring(
-            elem.getStartOffset(), elem.getEndOffsetInclusive() + 1
-          );
-        } else {
-          rawText += textEl.getText();
-        }
-      }
-    }
+    rawText = selectedPlainText_(selection);
   } else {
     rawText = doc.getBody().getText();
   }
@@ -261,19 +250,32 @@ function sefariaSearch() {
 function preferencesPopup() {
   const template = HtmlService.createTemplateFromFile('preferences');
   template.uiMode = getUiMode_();
-  template.appConfigJson = toEmbeddedJson_(getUiAppConfig_('preferences', 'preferences', {
+  template.appConfigJson = toEmbeddedJson_(getUiAppConfig_('preferences', 'preferences', Object.assign(sidebarPreferencesConfig_(), {
     menuLayoutEditor: getMenuLayoutEditorConfig_(DEV_FLAGS)
-  }));
+  })));
   template.devFlagsJson = JSON.stringify(DEV_FLAGS);
   const output = template.evaluate()
     .setTitle('Preferences')
-    .setWidth(600)
+    // Everything is wider, for the settings profiles column beside the tabs.
+    .setWidth(template.uiMode === 'full' ? 860 : 600)
     .setHeight(760);
   DocumentApp.getUi().showModalDialog(output, 'Preferences');
 }
 
+// The Session Library dialog hands its changes back to the sidebar here: the
+// dialog writes them as it closes, the sidebar polls for them. A failed write
+// used to be swallowed, so the dialog closed as if it had saved; a failed read
+// looked like "not closed yet", so the sidebar kept waiting and Library would
+// not reopen (BUG-009). The hand-off lives for seconds, so it is kept in the
+// user cache rather than UserProperties, which every preference read shares.
+var SL_DIALOG_ACTION_KEY_ = 'SL_DIALOG_ACTION';
+var SL_DIALOG_ACTION_TTL_SECONDS_ = 3600;
+
 function sessionLibraryPopup(sessionDataJson) {
-  PropertiesService.getUserProperties().deleteProperty('SL_DIALOG_ACTION');
+  CacheService.getUserCache().remove(SL_DIALOG_ACTION_KEY_);
+  // Before 30 October 2026 the hand-off lived in UserProperties and was
+  // deleted here; keep deleting any left there (PRIVACY.md §3 says so).
+  try { PropertiesService.getUserProperties().deleteProperty(SL_DIALOG_ACTION_KEY_); } catch (e) { /* nothing to clear */ }
   let parsed;
   try { parsed = JSON.parse(sessionDataJson); } catch(e) { parsed = { pinned: [], inserted: [] }; }
   if (!parsed || typeof parsed !== 'object') parsed = { pinned: [], inserted: [] };
@@ -285,26 +287,29 @@ function sessionLibraryPopup(sessionDataJson) {
   DocumentApp.getUi().showModalDialog(html, 'Session Library');
 }
 
+// Throws when the write fails: the dialog then stays open and says so, instead
+// of closing on changes the sidebar will never receive.
 function saveSessionLibraryAction(actionJson) {
-  try {
-    PropertiesService.getUserProperties().setProperty('SL_DIALOG_ACTION', String(actionJson || ''));
-  } catch(e) {}
+  CacheService.getUserCache().put(SL_DIALOG_ACTION_KEY_, String(actionJson || ''), SL_DIALOG_ACTION_TTL_SECONDS_);
 }
 
+// Throws when the cache can't be read, so the sidebar can tell "not closed
+// yet" (null) from "can't tell" and stop asking.
 function checkSessionLibraryAction() {
-  try {
-    const props = PropertiesService.getUserProperties();
-    const val = props.getProperty('SL_DIALOG_ACTION');
-    if (!val) return null;
-    const action = JSON.parse(val);
-    if (action && action.closed) {
-      props.deleteProperty('SL_DIALOG_ACTION');
-      return action;
-    }
-    return null;
-  } catch(e) {
+  const cache = CacheService.getUserCache();
+  const val = cache.get(SL_DIALOG_ACTION_KEY_);
+  if (!val) return null;
+  let action = null;
+  try { action = JSON.parse(val); } catch (e) { action = null; }
+  if (!action) {
+    cache.remove(SL_DIALOG_ACTION_KEY_);
     return null;
   }
+  if (action.closed) {
+    cache.remove(SL_DIALOG_ACTION_KEY_);
+    return action;
+  }
+  return null;
 }
 
 function divineNamePopup() {

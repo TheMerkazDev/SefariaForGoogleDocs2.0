@@ -48,13 +48,15 @@
 .mode-card,
 .layout-option {
   display: inline-flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 4px;
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
-  height: 36px;
-  padding: 0 6px;
+  min-height: 54px;
+  padding: 5px 3px;
   overflow: hidden;
   cursor: pointer;
   background: transparent;
@@ -63,6 +65,13 @@
   color: var(--row-sublabel);
   text-align: center;
   transition: background 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.io-choice-label {
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
 }
 
 .mode-card:hover,
@@ -121,6 +130,12 @@
 
 /* =============================================================
    ARRANGEMENT ICONS (a schematic page per layout)
+
+   Each icon follows the other settings (updateInsertionOptions sets
+   data-translit = off / below / left / right and data-lines on the group):
+   the transliteration (.tr) as a strip under the Hebrew or a column of its
+   own beside it, and with Line by line, the lines: the columns cut into rows
+   side by side, a second line (.layout-row--next) in Stacked.
    ============================================================= */
 
 .layout-icon {
@@ -139,6 +154,7 @@
 
 .layout-icon.stacked {
   flex-direction: column;
+  align-items: stretch;
 }
 
 .layout-col,
@@ -153,38 +169,215 @@
 }
 
 .layout-row {
+  /* Shrinks to fit when Line by line and the transliteration add rows. */
+  flex: 0 1 5px;
   width: 100%;
-  height: 5px;
+  min-height: 1px;
 }
 
-/* The Hebrew dark, the translation light, whichever side each is on. */
+/* The Hebrew dark, the translation light, the transliteration between,
+   whichever side each is on. */
+.layout-option {
+  --io-he: #1f3f75;
+  --io-en: #a9b8d1;
+  --io-tr: #5b7fbd;
+  --io-gap: #fff;
+}
+
+.layout-option:not(.selected) {
+  --io-he: #7c8595;
+  --io-en: #cfd3da;
+  --io-tr: #a4adbb;
+}
+
 .layout-col.he,
 .layout-row.he {
-  background: #1f3f75;
+  background-color: var(--io-he);
 }
 
 .layout-col.en,
 .layout-row.en {
-  background: #a9b8d1;
+  background-color: var(--io-en);
 }
 
-.layout-option:not(.selected) .layout-col.he,
-.layout-option:not(.selected) .layout-row.he {
-  background: #7c8595;
+.layout-col.tr,
+.layout-row.tr {
+  background-color: var(--io-tr);
 }
 
-.layout-option:not(.selected) .layout-col.en,
-.layout-option:not(.selected) .layout-row.en {
-  background: #cfd3da;
+/* Side by side: the translation, then the Hebrew (Right–Left), or the
+   reverse; the transliteration's column left or right of the Hebrew. */
+.side-by-side .layout-col.en { order: 0; }
+.side-by-side.reverse .layout-col.en { order: 4; }
+.side-by-side .layout-col.he { order: 2; }
+.side-by-side .layout-col.tr { order: 1; display: none; }
+.layout-option-group[data-translit="right"] .side-by-side .layout-col.tr { order: 3; }
+
+.layout-option-group[data-translit="left"] .side-by-side .layout-col.tr,
+.layout-option-group[data-translit="right"] .side-by-side .layout-col.tr {
+  display: block;
+}
+
+.layout-option-group[data-translit="left"] .side-by-side,
+.layout-option-group[data-translit="right"] .side-by-side {
+  gap: 2px;
+}
+
+.layout-option-group[data-translit="left"] .side-by-side .layout-col,
+.layout-option-group[data-translit="right"] .side-by-side .layout-col {
+  width: 6px;
+}
+
+/* Under the Hebrew, in its column. */
+.layout-option-group[data-translit="below"] .side-by-side .layout-col.he {
+  background-image: linear-gradient(to bottom, transparent 0 60%, var(--io-gap) 60% 70%, var(--io-tr) 70%);
+}
+
+/* Line by line, side by side: a row per line across the columns. */
+.layout-option-group[data-lines="true"] .side-by-side .layout-col {
+  background-image: repeating-linear-gradient(to bottom, transparent 0 4px, var(--io-gap) 4px 5px);
+}
+
+.layout-option-group[data-lines="true"][data-translit="below"] .side-by-side .layout-col.he {
+  background-image: repeating-linear-gradient(to bottom, transparent 0 2.5px, var(--io-tr) 2.5px 4px, var(--io-gap) 4px 5px);
+}
+
+/* Stacked: the Hebrew, then the translation; the transliteration (always
+   under the Hebrew) and the second line only when they apply. */
+.stacked .layout-row.tr,
+.stacked .layout-row--next {
+  display: none;
+}
+
+.layout-option-group:not([data-translit="off"]) .stacked .layout-row.tr:not(.layout-row--next) {
+  display: block;
+}
+
+.layout-option-group[data-lines="true"] .stacked .layout-row--next.he,
+.layout-option-group[data-lines="true"] .stacked .layout-row--next.en {
+  display: block;
+}
+
+.layout-option-group[data-lines="true"]:not([data-translit="off"]) .stacked .layout-row--next.tr {
+  display: block;
+}
+
+.layout-option-group:not([data-translit="off"]) .stacked,
+.layout-option-group[data-lines="true"] .stacked {
+  gap: 1px;
+}
+
+.layout-option-group:not([data-translit="off"]) .stacked .layout-row.tr {
+  flex-basis: 2px;
+}
+
+.layout-option-group[data-lines="true"] .stacked .layout-row {
+  flex-basis: 2.5px;
+}
+
+.layout-option-group[data-lines="true"]:not([data-translit="off"]) .stacked .layout-row {
+  flex-basis: 1.5px;
+}
+
+.layout-option-group[data-lines="true"] .stacked .layout-row--next.he {
+  margin-top: 1px;
 }
 
 /* =============================================================
-   The line options: "Line by line" (#layout-rows-toggle, one table row per
-   line for the side-by-side layouts), Line numbers and Citation. Switch rows
-   (.cc-row / .cc-toggle in shared/composition-card/css) under the pickers.
+   The line options: "Line by line" (#layout-rows-toggle: a table row per line
+   side by side, each line then its translation in Stacked), Line numbers and
+   Citation. Switch rows (.cc-row / .cc-toggle in shared/composition-card/css)
+   under the pickers.
    ============================================================= */
 
 .layout-rows-row {
   margin-top: 8px;
+}
+
+/* The composition card's transliteration Position, which only the
+   side-by-side arrangements use (updateInsertionOptions). */
+.cc-translit-position-row.is-inapplicable {
+  display: none;
+}
+
+/* The sidebar groups the same controls; Preferences and Link Texts retain
+   their detailed Source / Translation editors. No duplicate settings. */
+.io-grouped-options .io-inapplicable,
+.io-grouped-options .io-options-group[hidden],
+.io-grouped-options .io-text-role[hidden],
+.io-grouped-options .io-primary-options[hidden] {
+  display: none !important;
+}
+
+.io-primary-options {
+  margin: -6px 0 8px;
+}
+
+.io-options-group > .cc-section-summary {
+  display: grid;
+  grid-template-columns: 5px minmax(0, 1fr);
+  gap: 3px 8px;
+  padding: 10px 4px;
+}
+
+.io-options-group > .cc-section-summary::before {
+  align-self: center;
+}
+
+.io-options-group .io-group-state {
+  grid-column: 2;
+  overflow: visible;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.io-options-group .cc-section-label {
+  min-width: 0;
+}
+
+.io-options-group .cc-section-body {
+  padding-bottom: 10px;
+}
+
+.io-text-role-label {
+  margin: 8px 0 3px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.io-text-option {
+  position: relative;
+}
+
+.io-text-option-label {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  min-width: 0;
+}
+
+.io-text-option-label .cc-row-label {
+  flex: 0 1 auto;
+}
+
+.io-text-option .sidebar-option-tooltip {
+  white-space: normal;
+}
+
+.io-grouped-options .cc-translit-wrap {
+  width: 100%;
+}
+
+.io-grouped-options .cc-translit-menu {
+  right: 0;
+  left: auto;
+  box-sizing: border-box;
+  min-width: min(240px, 100%);
+  max-width: 100%;
+}
+
+.io-grouped-options .cc-translit-option {
+  white-space: normal;
 }
 </style>

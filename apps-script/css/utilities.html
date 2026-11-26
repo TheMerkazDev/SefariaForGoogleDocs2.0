@@ -34,8 +34,7 @@
 
 .helper-text,
 .experience-copy,
-.experience-note,
-.advanced-version-note {
+.experience-note {
   color: var(--muted);
   font-size: 11px;
   line-height: 1.35;
@@ -228,7 +227,9 @@
    ============================================================= */
 
 .insert-warning {
-  margin-bottom: 8px;
+  max-height: 112px;
+  overflow: auto;
+  overflow-wrap: anywhere;
   padding: 10px 12px;
   color: #8d1f1a;
   background: #fdecea;

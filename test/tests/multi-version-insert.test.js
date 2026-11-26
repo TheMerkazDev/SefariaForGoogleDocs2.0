@@ -68,6 +68,8 @@ function loadInsertion({ resolved, typography }) {
     },
     PropertiesService: { getUserProperties() { return { getProperty() { return null; } }; } },
     findReference(ref, versions) { return resolved[versions.en] || null; },
+    // Hebrew on top reads the stored "Line by line" when the caller omits it.
+    getPreferences() { return {}; },
     getTypographySettings() { return typography ? JSON.parse(JSON.stringify(typography)) : { roles: {} }; },
     formatDataForPesukim(d) { return d; },
     normalizeSourceEmphasisMode_(mode) { return mode || 'keep'; },
@@ -76,7 +78,7 @@ function loadInsertion({ resolved, typography }) {
   };
   vm.createContext(context);
   // hebrew-font*.gs: every role paragraph borrows missing Hebrew marks.
-  for (const file of ['apps-script/server/utils.gs', 'apps-script/server/insertion-target.gs',
+  for (const file of ['apps-script/server/source-text.gs', 'apps-script/server/utils.gs', 'apps-script/server/insertion-target.gs',
     'apps-script/server/hebrew-font-coverage.gs', 'apps-script/server/hebrew-fonts.gs', 'apps-script/server/insertion.gs']) {
     vm.runInContext(fs.readFileSync(file, 'utf8'), context, { filename: file });
   }
@@ -167,6 +169,48 @@ test('a request where every translation is empty fails instead of inserting noth
   assert.equal(children.length, 0);
 });
 
+test('he-top rejects a missing, empty, or substituted selected source edition before writing', () => {
+  const chosenSource = 'Miqra according to the Masorah';
+  const unavailableSources = [
+    { heVersionTitle: '', he: [] },
+    { heVersionTitle: chosenSource, he: ['', '&nbsp;'] },
+    { heVersionTitle: 'Another source edition', he: 'בְּרֵאשִׁית' },
+  ];
+  for (const source of unavailableSources) {
+    const { ctx, children } = loadInsertion({
+      resolved: {
+        Koren: Object.assign({}, resolved.Koren, source),
+        JPS: Object.assign({}, resolved.JPS, source),
+      },
+    });
+    assert.throws(
+      () => ctx.insertReferenceVersions('Genesis 1:1', {
+        versionTitles: ['Koren', 'JPS'], heVersionTitle: chosenSource,
+        bilingualLayout: 'he-top', insertHebrewSefariaLink: true,
+      }),
+      /source.*edition|Hebrew.*edition/i,
+      'successful translation fetches do not satisfy the explicitly chosen source edition'
+    );
+    assert.equal(children.length, 0, 'no title, blank source paragraph, or translation may be written before failure');
+  }
+});
+
+test('translation-only multi-insert does not require an unused selected source edition', () => {
+  const { ctx, texts } = loadInsertion({
+    resolved: {
+      Koren: Object.assign({}, resolved.Koren, { heVersionTitle: '', he: [] }),
+      JPS: Object.assign({}, resolved.JPS, { heVersionTitle: '', he: [] }),
+    },
+  });
+  const result = ctx.insertReferenceVersions('Genesis 1:1', {
+    versionTitles: ['Koren', 'JPS'], heVersionTitle: 'Unavailable source edition',
+    singleLanguage: 'en',
+  });
+  assert.deepEqual([...result.inserted], ['Koren', 'JPS']);
+  assert.ok(texts().includes('In the beginning'));
+  assert.ok(texts().includes('When God began'));
+});
+
 test('decodeHTMLEntities handles the typographic spaces Sefaria puts in Hebrew', () => {
   const { ctx } = loadInsertion({ resolved });
   assert.equal(ctx.decodeHTMLEntities('אָמַר&thinsp;רַבִּי'), 'אָמַר רַבִּי');
@@ -245,4 +289,96 @@ test('the sidebar session reaches each version\'s re-fetch (Layout tray cantilla
   assert.deepEqual(sessions, [['Koren', 's1'], ['JPS', 's1']]);
   // ... and the fonts: the Layout tray's font pickers are session overrides too.
   assert.deepEqual(typographySessions, ['s1']);
+});
+
+// BUG-004: with two translations, Hebrew on top and Citation on, the inserted
+// credits named only the translations; the Hebrew edition's license was left
+// out, though a one-translation or Hebrew-only insert of the same edition had
+// it. The Hebrew edition is credited once, under the Hebrew.
+const withHebrewEdition = (entry) => Object.assign({}, entry, {
+  heVersionTitle: 'Miqra according to the Masorah', heLicense: 'CC-BY-SA',
+});
+const credited = {
+  Koren: withHebrewEdition(resolved.Koren),
+  JPS: withHebrewEdition(resolved.JPS),
+};
+
+test('Hebrew on top with two translations credits the Hebrew edition once, and each translation', () => {
+  const { ctx, texts } = loadInsertion({ resolved: credited });
+  ctx.insertReferenceVersions('Genesis 1:1', {
+    versionTitles: ['Koren', 'JPS'], bilingualLayout: 'he-top', includeTranslationSourceInfo: true,
+  });
+  assert.deepEqual(texts(), [
+    'בראשית א:א', 'בְּרֵאשִׁית', 'Hebrew: Miqra according to the Masorah · License: CC-BY-SA',
+    'Genesis 1:1 (Koren)', 'In the beginning', 'Translation: Koren',
+    '',
+    'Genesis 1:1 (JPS)', 'When God began', 'Translation: JPS',
+    '',
+  ]);
+});
+
+test('one translation on the multi-version path credits the Hebrew edition too', () => {
+  const { ctx, texts } = loadInsertion({ resolved: credited });
+  ctx.insertReferenceVersions('Genesis 1:1', {
+    versionTitles: ['Koren'], bilingualLayout: 'he-top', includeTranslationSourceInfo: true,
+  });
+  assert.equal(texts().filter((t) => t.startsWith('Hebrew: ')).length, 1);
+});
+
+test('no Hebrew credit with Citation off, without Hebrew, or without a Hebrew edition title', () => {
+  const off = loadInsertion({ resolved: credited });
+  off.ctx.insertReferenceVersions('Genesis 1:1', { versionTitles: ['Koren', 'JPS'], bilingualLayout: 'he-top' });
+  assert.equal(off.texts().some((t) => /Hebrew:|License:|Translation:/.test(t)), false);
+
+  const translationOnly = loadInsertion({ resolved: credited });
+  translationOnly.ctx.insertReferenceVersions('Genesis 1:1', {
+    versionTitles: ['Koren', 'JPS'], singleLanguage: 'en', includeTranslationSourceInfo: true,
+  });
+  assert.equal(translationOnly.texts().some((t) => t.startsWith('Hebrew: ')), false);
+
+  // A license without the edition's name says nothing usable; as on the
+  // single-translation path (source-attribution.test.js), it is left out.
+  const untitled = loadInsertion({
+    resolved: { Koren: Object.assign({}, resolved.Koren, { heLicense: 'CC-BY-SA' }), JPS: resolved.JPS },
+  });
+  untitled.ctx.insertReferenceVersions('Genesis 1:1', {
+    versionTitles: ['Koren', 'JPS'], bilingualLayout: 'he-top', includeTranslationSourceInfo: true,
+  });
+  assert.equal(untitled.texts().some((t) => /Hebrew:|CC-BY-SA/.test(t)), false);
+});
+
+test('the Hebrew credit does not pass its 8 pt size on to the translation titles', () => {
+  const { ctx, children } = loadInsertion({
+    resolved: credited,
+    typography: { roles: { citation: { size: 8 } } },
+  });
+  ctx.insertReferenceVersions('Genesis 1:1', {
+    versionTitles: ['Koren', 'JPS'], bilingualLayout: 'he-top', includeTranslationSourceInfo: true,
+  });
+  const titles = children.filter((c) => c._state.text.startsWith('Genesis'));
+  titles.forEach((t) => assert.notEqual(t._state.attrs.FONT_SIZE, 8, t._state.text));
+});
+
+
+test('multi-version insertion preserves significant edition whitespace in results and pinned links', () => {
+  const title = 'The Philosophical Tanakh '; // Exact title present in Sefaria's Genesis catalog.
+  const fixture = { ...resolved.Koren, versionTitle: title };
+  const { ctx, children } = loadInsertion({ resolved: { [title]: fixture, JPS: resolved.JPS } });
+  const result = ctx.insertReferenceVersions('Genesis 1:1', {
+    versionTitles: [title, 'JPS'], singleLanguage: 'en', insertSefariaLink: true,
+  });
+  assert.deepEqual(Array.from(result.inserted), [title, 'JPS']);
+  assert.equal(children.map((c) => c._state.link).filter(Boolean)[0],
+    'https://www.sefaria.org/Genesis_1%3A1?ven=The_Philosophical_Tanakh_');
+});
+
+test('multi-version selection compares exact edition names and never merges whitespace-distinct identities', () => {
+  const { ctx } = loadInsertion({ resolved });
+  const one = { ...resolved.Koren, versionTitle: 'Edition' };
+  const two = { ...resolved.Koren, versionTitle: 'Edition ' };
+  const result = ctx.selectInsertableVersions_(['Edition', 'Edition ', 'Edition'], [one, two, one]);
+  assert.deepEqual(Array.from(result.kept, (entry) => entry.versionTitle), ['Edition', 'Edition ']);
+  const mismatch = ctx.selectInsertableVersions_(['Edition '], [one]);
+  assert.equal(mismatch.kept.length, 0);
+  assert.deepEqual(Array.from(mismatch.skipped), ['Edition ']);
 });

@@ -59,6 +59,48 @@ function loadMigrations(initialProps = {}) {
   return { context, userProperties };
 }
 
+test('every user setting has a canonical default for reads, reset and profile snapshots', () => {
+  const { context } = loadMigrations();
+  const defaults = context.getDefaultPreferences();
+  const keys = vm.runInContext('SETTINGS', context);
+  keys.forEach((key) => {
+    assert.ok(Object.hasOwn(defaults, key), `missing default: ${key}`);
+    assert.notEqual(defaults[key], undefined, `undefined default: ${key}`);
+  });
+});
+
+test('schema 33 seeds the existing Voices and Lexicon fallback choices once', () => {
+  const { context, userProperties } = loadMigrations({ prefs_schema_version: '32' });
+  context.runUserPreferenceMigrationsIfNeeded_();
+  assert.equal(userProperties.getProperty('prefs_schema_version'), CURRENT);
+  assert.equal(userProperties.getProperty('voices_insert_mode_default'), 'reference');
+  assert.equal(userProperties.getProperty('voices_translit_default'), 'none');
+  assert.equal(userProperties.getProperty('lexicon_insert_mode_default'), 'entry');
+  assert.equal(context.migrateToV33_(userProperties), false, 'a second pass writes nothing');
+});
+
+test('schema 33 preserves saved workflow modes, Commentary, Notes and interface choices', () => {
+  const chosen = {
+    voices_insert_mode_default: 'both', voices_translit_default: 'ashkenazi',
+    lexicon_insert_mode_default: 'definition', source_emphasis_mode: 'only',
+    source_notes_mode: 'separate', ui_mode: 'simple'
+  };
+  const { context, userProperties } = loadMigrations({ prefs_schema_version: '32', ...chosen });
+  context.runUserPreferenceMigrationsIfNeeded_();
+  Object.entries(chosen).forEach(([key, value]) => assert.equal(userProperties.getProperty(key), value, key));
+});
+
+test('schema 33 repairs a generated undefined mode already activated from an old profile', () => {
+  const { context, userProperties } = loadMigrations({ prefs_schema_version: '32',
+    voices_insert_mode_default: 'undefined', voices_translit_default: 'undefined', lexicon_insert_mode_default: 'undefined'
+  });
+  context.runUserPreferenceMigrationsIfNeeded_();
+  assert.equal(userProperties.getProperty('voices_insert_mode_default'), 'reference');
+  assert.equal(userProperties.getProperty('voices_translit_default'), 'none');
+  assert.equal(userProperties.getProperty('lexicon_insert_mode_default'), 'entry');
+  assert.equal(context.migrateToV33_(userProperties), false);
+});
+
 test('fresh install at current schema version does not rewrite anything', () => {
   // A new user installs the add-on; onInstall has already populated defaults,
   // and the schema version is already up to date. No migration work.
@@ -563,4 +605,82 @@ test('v25 sets the citation style to its old look, never overwriting a stored va
   assert.equal(userProperties.getProperty('citation_font_size'), '10');
   assert.equal(userProperties.getProperty('citation_font_style'), 'italic');
   assert.equal(userProperties.getProperty('citation_font_color'), '');
+});
+
+// v26: the "Name the edition" switches start on: a linked title has always
+// named its edition.
+test('v26 turns "Name the edition" on for both titles, never overwriting a stored switch', () => {
+  const { context, userProperties } = loadMigrations({ prefs_schema_version: '25', hebrew_link_edition_label: 'false' });
+  context.runUserPreferenceMigrationsIfNeeded_();
+  assert.equal(userProperties.getProperty('prefs_schema_version'), CURRENT);
+  assert.equal(userProperties.getProperty('sefaria_link_edition_label'), 'true');
+  assert.equal(userProperties.getProperty('hebrew_link_edition_label'), 'false');
+});
+
+// v29: Preferences → Sidebar and settings profiles. Every user has had the
+// Voices and Lexicon tabs, every Quick Actions button and every Insertion
+// Options control, so an upgrader (Simple or Everything) gets them all: a
+// missing value must never hide one (hard rule 2). Nobody has a profile.
+test('v29 shows every tab, button and control, makes no profile, and never overwrites a stored value', () => {
+  for (const ui of ['simple', 'full']) {
+    const { context, userProperties } = loadMigrations({ prefs_schema_version: '28', ui_mode: ui, show_lexicon_tab: 'false' });
+    context.runUserPreferenceMigrationsIfNeeded_();
+    assert.equal(userProperties.getProperty('prefs_schema_version'), CURRENT);
+    assert.equal(userProperties.getProperty('show_voices_tab'), 'true', ui);
+    assert.equal(userProperties.getProperty('show_lexicon_tab'), 'false', `${ui}: a stored switch is kept`);
+    assert.equal(userProperties.getProperty('sidebar_quick_actions_hidden'), '[]', ui);
+    assert.equal(userProperties.getProperty('sidebar_options_hidden'), '[]', ui);
+    assert.equal(userProperties.getProperty('settings_profiles'), '', ui);
+  }
+});
+
+// v31: the transliteration's spelling of the Name. Every transliteration has
+// written "HaShem", so an upgrader keeps it (hard rule 2).
+test('v31 keeps the Name "HaShem" in the transliteration, never overwriting a stored spelling', () => {
+  const upgrader = loadMigrations({ prefs_schema_version: '30' });
+  upgrader.context.runUserPreferenceMigrationsIfNeeded_();
+  assert.equal(upgrader.userProperties.getProperty('prefs_schema_version'), CURRENT);
+  assert.equal(upgrader.userProperties.getProperty('transliteration_divine_name'), 'HaShem');
+  const chosen = loadMigrations({ prefs_schema_version: '30', transliteration_divine_name: 'Adonai' });
+  chosen.context.runUserPreferenceMigrationsIfNeeded_();
+  assert.equal(chosen.userProperties.getProperty('transliteration_divine_name'), 'Adonai');
+  assert.equal(upgrader.context.getDefaultPreferences().transliteration_divine_name, 'HaShem');
+});
+
+// A stored settings profile is migrated through the same steps when it comes
+// back into use (server/settings-profiles.gs), so the driver and the steps
+// must stay apart: the driver stamps the schema; the steps never do.
+test('the migration steps run on any store, from any schema, without stamping it', () => {
+  const { context } = loadMigrations({});
+  const store = { teamim_filter: 'torah' };
+  const props = {
+    getProperty: (k) => (Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null),
+    setProperty(k, v) { store[k] = String(v); return this; },
+    deleteProperty(k) { delete store[k]; return this; },
+  };
+  context.applyMigrationsFrom_(props, 23);
+  assert.equal(store.teamim_filter, 'tanakh');
+  assert.ok(!('prefs_schema_version' in store));
+  assert.match(MIGRATIONS_SOURCE, /applyMigrationsFrom_\(userProperties, from\);\s*userProperties\.setProperty\(PREFS_SCHEMA_KEY_, PREFS_SCHEMA_CURRENT_\);/);
+});
+
+test('a new user is seeded with both sidebar tabs on', () => {
+  const { context, userProperties } = loadMigrations({});
+  context.runUserPreferenceMigrationsIfNeeded_();
+  assert.equal(userProperties.getProperty('show_voices_tab'), 'true');
+  assert.equal(userProperties.getProperty('show_lexicon_tab'), 'true');
+  const defaults = context.getDefaultPreferences();
+  assert.equal(defaults.show_voices_tab, true);
+  assert.equal(defaults.show_lexicon_tab, true);
+});
+
+
+test('schema 34 preserves existing sizing and explicit Auto-Scale Hebrew choice', () => {
+  const unset = loadMigrations({ prefs_schema_version: '33' });
+  unset.context.runUserPreferenceMigrationsIfNeeded_();
+  assert.equal(unset.userProperties.getProperty('auto_scale_hebrew'), 'false');
+  assert.equal(unset.context.migrateToV34_(unset.userProperties), false);
+  const enabled = loadMigrations({ prefs_schema_version: '33', auto_scale_hebrew: 'true' });
+  enabled.context.migrateToV34_(enabled.userProperties);
+  assert.equal(enabled.userProperties.getProperty('auto_scale_hebrew'), 'true');
 });

@@ -16,12 +16,17 @@ must land with a migration here AND a row in the regression log.
 
 Contract: each `migrateToV<N>_` function takes a `UserProperties`
 handle and returns true if it wrote anything, false otherwise. The
-driver function `runUserPreferenceMigrationsIfNeeded_()` is the only
-public entry point; it is safe to call from any event handler.
+driver function `runUserPreferenceMigrationsIfNeeded_()` is the entry
+point for the stored preferences; it is safe to call from any event
+handler. The steps themselves are `applyMigrationsFrom_`, which also
+brings a stored settings profile forward when it comes back into use
+(server/settings-profiles.gs): a migration must work on any object with
+getProperty / setProperty / deleteProperty, and on a store that holds
+only a profile's keys.
 */
 
 var PREFS_SCHEMA_KEY_ = 'prefs_schema_version';
-var PREFS_SCHEMA_CURRENT_ = '25';
+var PREFS_SCHEMA_CURRENT_ = '34';
 
 function runUserPreferenceMigrationsIfNeeded_() {
   var userProperties = PropertiesService.getUserProperties();
@@ -49,6 +54,20 @@ function runUserPreferenceMigrationsIfNeeded_() {
     from = 0;
   }
 
+  applyMigrationsFrom_(userProperties, from);
+  userProperties.setProperty(PREFS_SCHEMA_KEY_, PREFS_SCHEMA_CURRENT_);
+  return true;
+}
+
+/**
+ * Every migration after schema `from`, in order, on `userProperties` (any
+ * object with getProperty / setProperty / deleteProperty). The driver above
+ * runs it on the stored preferences; a stored settings profile is brought
+ * forward through it too when it comes back into use
+ * (migrateProfileValues_ in server/settings-profiles.gs), so a value whose
+ * meaning a later schema changes is migrated wherever it is kept.
+ */
+function applyMigrationsFrom_(userProperties, from) {
   // v1 -> v2: cover opt-in gates added by the rewrite that turned existing
   // behavior off for upgraders.
   if (from < 2) {
@@ -225,9 +244,57 @@ function runUserPreferenceMigrationsIfNeeded_() {
   if (from < 25) {
     migrateToV25_(userProperties);
   }
-
-  userProperties.setProperty(PREFS_SCHEMA_KEY_, PREFS_SCHEMA_CURRENT_);
-  return true;
+  // v25 -> v26: introduces `sefaria_link_edition_label` and
+  // `hebrew_link_edition_label` ("Name the edition"), set on, so a linked
+  // title keeps naming its edition as it always has.
+  if (from < 26) {
+    migrateToV26_(userProperties);
+  }
+  // v26 -> v27: introduces `lexicon_dictionary_order` and
+  // `lexicon_dictionary_excluded`, both "[]": the built-in order, nothing
+  // hidden.
+  if (from < 27) {
+    migrateToV27_(userProperties);
+  }
+  // v27 -> v28: introduces `voices_topic_order` and `voices_topic_excluded`,
+  // both "[]": the built-in order, nothing hidden.
+  if (from < 28) {
+    migrateToV28_(userProperties);
+  }
+  // v28 -> v29: Preferences → Sidebar and settings profiles. Introduces
+  // `show_voices_tab` and `show_lexicon_tab` (set on: every user has the
+  // tabs, and Simple mode now shows them too), `sidebar_quick_actions_hidden`
+  // and `sidebar_options_hidden` ("[]": every button and control shows), and
+  // `settings_profiles` ("": no profiles yet).
+  if (from < 29) {
+    migrateToV29_(userProperties);
+  }
+  // v29 -> v30: introduces `transliteration_position` ("below": under the
+  // Hebrew, where the transliteration has always gone). "Line by line"
+  // (`bilingual_aligned_rows`) now also applies to Stacked; its stored value
+  // is left as it is.
+  if (from < 30) {
+    migrateToV30_(userProperties);
+  }
+  // v30 -> v31: introduces `transliteration_divine_name` ("HaShem": how the
+  // transliteration has always written the Name).
+  if (from < 31) {
+    migrateToV31_(userProperties);
+  }
+  // v31 -> v32: seed the Notes preference when no choice was stored.
+  // Earlier builds already seeded Omit; those stored choices are preserved.
+  if (from < 32) {
+    migrateToV32_(userProperties);
+  }
+  // v32 -> v33: make the Voices and Lexicon fallback choices explicit.
+  // Reset, settings files and profiles now share the same defaults; readers
+  // who already chose a mode keep it. Repair the generated "undefined"
+  // sentinel from older profile snapshots, which is not a valid choice.
+  if (from < 33) {
+    migrateToV33_(userProperties);
+  }
+  // v34: new optional optical Hebrew scaling, off to preserve existing formatting.
+  if (from < 34) migrateToV34_(userProperties);
 }
 
 /**
@@ -621,6 +688,131 @@ function migrateToV25_(userProperties) {
   return true;
 }
 
+/**
+ * V26: the two "Name the edition" switches start on: a linked title has
+ * always read "Genesis 1:1 (Translation • Edition)". A stored switch is never
+ * overwritten.
+ */
+function migrateToV26_(userProperties) {
+  ['sefaria_link_edition_label', 'hebrew_link_edition_label'].forEach(function(key) {
+    if (userProperties.getProperty(key) == null) userProperties.setProperty(key, 'true');
+  });
+  return true;
+}
+
+/**
+ * V27: introduces the Lexicon dictionary preferences, the dictionaries'
+ * counterpart of V15's corpus preferences.
+ *
+ * - `lexicon_dictionary_order`: JSON array of dictionary keys. "[]" means the
+ *   built-in order (Klein, BDB, BDB Aramaic, Jastrow, Strong's, Ben-Yehuda).
+ * - `lexicon_dictionary_excluded`: JSON array of dictionary keys whose entries
+ *   the Lexicon leaves out. "[]" hides nothing, so upgraders see every
+ *   dictionary they saw before. A stored value is never overwritten.
+ */
+function migrateToV27_(userProperties) {
+  if (userProperties.getProperty('lexicon_dictionary_order') == null) {
+    userProperties.setProperty('lexicon_dictionary_order', '[]');
+  }
+  if (userProperties.getProperty('lexicon_dictionary_excluded') == null) {
+    userProperties.setProperty('lexicon_dictionary_excluded', '[]');
+  }
+  return true;
+}
+
+/**
+ * V28: introduces the Voices topic preferences: the source sheets' topic
+ * categories, ordered and hidden like V15's corpora and V27's dictionaries.
+ *
+ * - `voices_topic_order`: JSON array of topic keys. "[]" means the built-in
+ *   order (Torah Portions, Shabbat & Holidays, Prayer, … Other).
+ * - `voices_topic_excluded`: JSON array of topic keys whose sheets Voices
+ *   leaves out. "[]" hides nothing, so upgraders see every sheet they saw
+ *   before. A stored value is never overwritten.
+ */
+function migrateToV28_(userProperties) {
+  if (userProperties.getProperty('voices_topic_order') == null) {
+    userProperties.setProperty('voices_topic_order', '[]');
+  }
+  if (userProperties.getProperty('voices_topic_excluded') == null) {
+    userProperties.setProperty('voices_topic_excluded', '[]');
+  }
+  return true;
+}
+
+/**
+ * V29: Preferences → Sidebar, and settings profiles. The sidebar's Voices and
+ * Lexicon tabs get a switch each, set on: every user has had the tabs (Full
+ * mode always showed them; Simple mode hid them while in Texts and now shows
+ * them), so a missing value never hides one. Nothing is hidden among the
+ * Quick Actions buttons or the Insertion Options controls, as before, and no
+ * profile exists. A stored value is never overwritten.
+ */
+var V29_DEFAULTS_ = {
+  show_voices_tab: 'true',
+  show_lexicon_tab: 'true',
+  sidebar_quick_actions_hidden: '[]',
+  sidebar_options_hidden: '[]',
+  settings_profiles: ''
+};
+
+function migrateToV29_(userProperties) {
+  Object.keys(V29_DEFAULTS_).forEach(function(key) {
+    if (userProperties.getProperty(key) == null) userProperties.setProperty(key, V29_DEFAULTS_[key]);
+  });
+  return true;
+}
+
+/**
+ * V30: the transliteration can have a column of its own in the side-by-side
+ * layouts. `transliteration_position` is set to "below", under the Hebrew in
+ * its own column, which is where every insert has put it until now. A stored
+ * value is never overwritten.
+ */
+function migrateToV30_(userProperties) {
+  if (userProperties.getProperty('transliteration_position') == null) {
+    userProperties.setProperty('transliteration_position', 'below');
+  }
+  return true;
+}
+
+/**
+ * V31: the transliteration's spelling of the Name can be chosen
+ * (Preferences -> Insertion -> Transliteration Mapping).
+ * `transliteration_divine_name` is set to "HaShem", which every
+ * transliteration has written until now. A stored value is never overwritten.
+ */
+function migrateToV31_(userProperties) {
+  if (userProperties.getProperty('transliteration_divine_name') == null) {
+    userProperties.setProperty('transliteration_divine_name', 'HaShem');
+  }
+  return true;
+}
+
+/** V32: never overwrite a reader's explicit Notes choice. */
+function migrateToV32_(userProperties) {
+  if (userProperties.getProperty('source_notes_mode') != null) return false;
+  userProperties.setProperty('source_notes_mode', 'separate');
+  return true;
+}
+
+/** V33: seed workflow choices and repair only the old generated sentinel. */
+function migrateToV33_(userProperties) {
+  var defaults = {
+    voices_insert_mode_default: 'reference',
+    voices_translit_default: 'none',
+    lexicon_insert_mode_default: 'entry'
+  };
+  var wrote = false;
+  Object.keys(defaults).forEach(function (key) {
+    var current = userProperties.getProperty(key);
+    if (current != null && current !== 'undefined') return;
+    userProperties.setProperty(key, defaults[key]);
+    wrote = true;
+  });
+  return wrote;
+}
+
 function migrateToV3_(userProperties) {
   var aiKeys = [
     'experimental_ai_source_sheet_enabled',
@@ -640,5 +832,12 @@ function migrateToV3_(userProperties) {
   for (var i = 0; i < aiKeys.length; i++) {
     try { userProperties.deleteProperty(aiKeys[i]); } catch (_e) { /* ignore */ }
   }
+  return true;
+}
+
+
+function migrateToV34_(userProperties) {
+  if (userProperties.getProperty('auto_scale_hebrew') != null) return false;
+  userProperties.setProperty('auto_scale_hebrew', 'false');
   return true;
 }

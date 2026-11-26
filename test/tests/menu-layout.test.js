@@ -35,7 +35,7 @@ function describeEntries(entries) {
   });
 }
 
-const FIXED_TAIL = ['---', 'Preferences', 'Help & Support'];
+const FIXED_TAIL = ['---', 'Preferences', { Help: ['How to...', 'Support', 'About', 'Re-run Setup Wizard'] }];
 
 test('default layout reproduces the menu that shipped before it was customizable', () => {
   const ctx = load();
@@ -71,7 +71,7 @@ test('Preferences and Help are always last, whatever is stored', () => {
     const plan = describe(ctx.planMenuFromLayout_(raw, { surpriseMeEnabled: false }));
     assert.deepEqual(plan.slice(-3), FIXED_TAIL, raw);
     assert.equal(plan.filter((l) => l === 'Preferences').length, 1, raw);
-    assert.equal(plan.filter((l) => l === 'Help & Support').length, 1, raw);
+    assert.equal(plan.filter((l) => l && typeof l === 'object' && l.Help).length, 1, raw);
   }
 });
 
@@ -117,7 +117,8 @@ test('an emptied submenu is left out of the menu', () => {
     quick_actions: ['-'],
   };
   const plan = ctx.planMenuFromLayout_(layout, { surpriseMeEnabled: false });
-  assert.ok(!plan.some((e) => e.type === 'submenu'));
+  assert.ok(!plan.some((e) => e.type === 'submenu' && e.label === 'Quick Actions'));
+  assert.ok(plan.some((e) => e.type === 'submenu' && e.label === 'Help'));
 });
 
 test('no two dividers are ever adjacent, and none leads a list', () => {
@@ -177,11 +178,90 @@ test('hiding the submenu placeholder hides the whole Quick Actions submenu', () 
   const ctx = load();
   const d = ctx.getDefaultMenuLayout_();
   const plan = ctx.planMenuFromLayout_({ top: d.top, quick_actions: d.quick_actions, hidden: ['quick_actions'] }, { surpriseMeEnabled: false });
-  assert.ok(!plan.some((e) => e.type === 'submenu'));
+  assert.ok(!plan.some((e) => e.type === 'submenu' && e.label === 'Quick Actions'));
+  assert.ok(plan.some((e) => e.type === 'submenu' && e.label === 'Help'));
 });
 
 test('a layout without "hidden" hides nothing', () => {
   const ctx = load();
   const normalized = ctx.normalizeMenuLayout_(ctx.getDefaultMenuLayoutJson_());
   assert.equal(normalized.hidden.length, 0);
+});
+
+// Preferences → Menu Bar moves an item between the menu and the Quick Actions
+// submenu with a button that says where it goes ("Move to Quick Actions ▸",
+// "◂ Move to main menu"); a bare arrow beside ↑ and ↓ went unnoticed. The
+// move itself is menuLayoutMove (preferences/js.html), run here against the
+// plan the real menu is built from.
+const PREFS_JS = fs.readFileSync(path.resolve(__dirname, '../../apps-script/preferences/js.html'), 'utf8');
+
+function loadMenuLayoutMove() {
+  const source = PREFS_JS.match(/function menuLayoutMove\(state, listName, index\) \{[\s\S]*?\n    \}/);
+  assert.ok(source, 'preferences/js.html defines menuLayoutMove');
+  const context = { MENU_SUBMENU_ID: 'quick_actions' };
+  vm.createContext(context);
+  vm.runInContext(source[0], context);
+  return context.menuLayoutMove;
+}
+
+function editorState(layout) {
+  return JSON.parse(JSON.stringify(Object.assign({ hidden: [] }, layout)));
+}
+
+test('an item moved out of Quick Actions lands just below it in the main menu', () => {
+  const ctx = load();
+  const move = loadMenuLayoutMove();
+  const state = editorState(ctx.getDefaultMenuLayout_());
+  const where = move(state, 'quick_actions', state.quick_actions.indexOf('link_texts'));
+  assert.deepEqual(JSON.parse(JSON.stringify(where)), { list: 'top', index: state.top.indexOf('quick_actions') + 1 });
+  const plan = describe(ctx.planMenuFromLayout_(state, { surpriseMeEnabled: true }));
+  assert.deepEqual(plan, [
+    'Texts', 'Voices', 'Lexicon', 'Insert Source from Selection',
+    { 'Quick Actions': ['Quick Actions Sidebar', '---', 'Transform Divine Names', 'Unlink Sources', '---', 'Gematriya Count'] },
+    'Link Texts with Sefaria',
+    '---', 'Surprise Me',
+    ...FIXED_TAIL,
+  ]);
+});
+
+test('an item moved into Quick Actions goes to its end, and back out again', () => {
+  const ctx = load();
+  const move = loadMenuLayoutMove();
+  const state = editorState(ctx.getDefaultMenuLayout_());
+  const into = move(state, 'top', state.top.indexOf('lexicon'));
+  assert.equal(into.list, 'quick_actions');
+  assert.equal(state.quick_actions[state.quick_actions.length - 1], 'lexicon');
+  assert.ok(!state.top.includes('lexicon'));
+  const plan = describe(ctx.planMenuFromLayout_(state, { surpriseMeEnabled: true }));
+  assert.deepEqual(plan[3], { 'Quick Actions': ['Quick Actions Sidebar', '---', 'Transform Divine Names', 'Link Texts with Sefaria', 'Unlink Sources', '---', 'Gematriya Count', 'Lexicon'] });
+  // And back: below Quick Actions, never lost.
+  move(state, 'quick_actions', state.quick_actions.indexOf('lexicon'));
+  assert.equal(state.top[state.top.indexOf('quick_actions') + 1], 'lexicon');
+  assert.ok(!state.quick_actions.includes('lexicon'));
+});
+
+test('moving an item into an emptied or hidden Quick Actions brings the submenu back', () => {
+  const ctx = load();
+  const move = loadMenuLayoutMove();
+  const state = editorState({ top: ['texts', 'voices'], quick_actions: [], hidden: ['quick_actions'] });
+  move(state, 'top', 1);
+  assert.deepEqual(state.top, ['texts', 'quick_actions']);
+  assert.deepEqual(state.hidden, []);
+  const plan = describe(ctx.planMenuFromLayout_(state, { surpriseMeEnabled: false }));
+  assert.equal(plan[0], 'Texts');
+  assert.equal(plan[1]['Quick Actions'][0], 'Voices', 'the moved item is in the submenu, and the submenu is shown');
+});
+
+test('the move buttons say where they go', () => {
+  assert.match(PREFS_JS, /menuLayoutButton\('Move to ' \+ menuEditorConfig\.submenuLabel \+ ' ▸'/);
+  assert.match(PREFS_JS, /menuLayoutButton\('◂ Move to main menu'/);
+  assert.match(PREFS_JS, /focus = menuLayoutMove\(menuLayoutState, listName, index\);/);
+});
+
+test('Texts-only mode uses the legacy menu label and removes disabled tools', () => {
+  const ctx = load();
+  const plan = describe(ctx.planMenuFromLayout_(ctx.getDefaultMenuLayout_(), { voicesEnabled: false, lexiconEnabled: false }));
+  assert.equal(plan[0], 'Add Sources with Sefaria');
+  assert.ok(!plan.includes('Voices') && !plan.includes('Lexicon'));
+  assert.deepEqual(plan.slice(-3), FIXED_TAIL);
 });

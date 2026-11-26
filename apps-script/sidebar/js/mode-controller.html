@@ -96,6 +96,8 @@ var preferencesMayHaveChanged = false;
 
 function reloadAccountPreferences() {
   preferencesMayHaveChanged = false;
+  // A profile made, renamed or switched in Preferences (preferences-state).
+  loadSettingsProfiles();
   google.script.run.withSuccessHandler(function (stored) {
     var updated = clonePlainObject(stored || {});
     if (JSON.stringify(updated) === JSON.stringify(accountPreferences)) return;
@@ -104,13 +106,68 @@ function reloadAccountPreferences() {
       ? mergePreferenceLayers(accountPreferences, sessionPreferences)
       : mergePreferenceLayers(accountPreferences, {});
     applyEffectivePreferencesToUI();
-    if (appMode === 'texts' && selectedRefValue) scheduleSelectedResultRefresh();
+    if (appMode !== 'texts' || selectedRefValue) scheduleSelectedResultRefresh();
   }).getPreferences();
+}
+
+function applyPreferencesToCurrentPreview(event) {
+  var channel = sidebarPreferenceChannel();
+  if (!channel || event.key !== channel || !event.newValue) return;
+  var request;
+  try { request = JSON.parse(event.newValue); } catch (error) { return; }
+  if (!request || typeof request.id !== 'string' || !request.values) return;
+
+  function respond(message) {
+    try {
+      localStorage.setItem(channel + ':ack', JSON.stringify({ id: request.id, message: message }));
+      localStorage.removeItem(channel + ':ack');
+    } catch (error) { /* Preferences will report the missing acknowledgement. */ }
+  }
+  if (appMode !== 'texts' || !hasResolvedReference || !sidebarSessionId) {
+    respond('Preview a source in the open Texts sidebar before applying these settings.');
+    return;
+  }
+  var profile = activeSettingsProfile();
+  if (request.profile !== (profile ? profile.id : 'p1')) {
+    respond('The sidebar is using a different profile. Reopen Preferences and try again.');
+    return;
+  }
+  if (sessionSaveQueue.action) {
+    respond('The sidebar is changing its settings. Try again when it is ready.');
+    return;
+  }
+  var changes = {};
+  (getAppConfig().sidebarPreferenceKeys || []).forEach(function (key) {
+    var value = request.values[key];
+    if (typeof value === 'boolean' || typeof value === 'number' ||
+        (typeof value === 'string' && value.length <= 9000)) changes[key] = value;
+  });
+  saveSessionPreference(changes, function () {
+    respond('Applied for this sidebar session. The preview will refresh.');
+  });
+  scheduleSelectedResultRefresh();
 }
 
 window.addEventListener('storage', function (event) {
   if (event.key === PREFERENCES_SAVED_STORAGE_KEY) reloadAccountPreferences();
+  if (event.key === UI_MODE_STORAGE_KEY) applyUiModeFromStorage(event.newValue);
+  applyPreferencesToCurrentPreview(event);
 });
+
+// Preferences' Interface switch (Simple / Everything) reaches an open sidebar
+// at once, through UI_MODE_STORAGE_KEY (preferences/js.html). Simple mode is
+// CSS only (css/components/simple-mode), so the attribute is all that
+// changes. The sidebar used to say "Refresh the sidebar to see the change",
+// and the refresh cleared this session's Insertion Options.
+var UI_MODE_STORAGE_KEY = 'sefariaUiMode';
+
+function applyUiModeFromStorage(raw) {
+  if (!raw) return;
+  var mode = null;
+  try { mode = JSON.parse(raw).mode; } catch (e) { return; }
+  if (mode !== 'simple' && mode !== 'full') return;
+  $('.unified-sidebar').attr('data-ui-mode', mode);
+}
 
 function reloadAccountPreferencesIfStale_() {
   if (preferencesMayHaveChanged) reloadAccountPreferences();
@@ -152,11 +209,84 @@ function syncExperimentalAvailability() {
   var hasExperimental = hasExperimentalFeaturesEnabled();
   var surpriseEnabled = isSurpriseEnabled();
   $('.experimental-menu-button').toggle(hasExperimental);
-  $('#sm-inline-launch').closest('.exp-card').toggle(surpriseEnabled);
+  // Keep the tab bar when 🧪 is all that sits beside Texts, and the 🏃 button
+  // when Surprise Me is all that is in it (css/components/sidebar-controls).
+  $('.unified-sidebar')
+    .toggleClass('has-experimental-tab', hasExperimental)
+    .toggleClass('has-surprise-action', surpriseEnabled);
+  $('#exp-card-surprise').toggle(surpriseEnabled);
   $('#footer-actions-panel .open-surprise-tool').toggle(surpriseEnabled);
   if (!hasExperimental && appMode === 'experimental') {
     appMode = 'texts';
   }
+}
+
+// Preferences → Sidebar: the result tabs that are on, and the Quick Actions
+// buttons and Insertion Options controls the person hid. The server prints
+// the sidebar root's data-sidebar-tabs, data-quick-actions-hidden and
+// data-options-hidden for the first paint (openSharedSidebar_, by the same
+// rules: sidebarControlsFromPreferences_ in server/preferences.gs); this keeps
+// them in step when Preferences saves while the sidebar is open, without a
+// refresh. CSS does the hiding (css/components/sidebar-controls) and keeps a
+// switched-off tab shown while it is the open one, so nobody is moved out of a
+// search they are in.
+var SIDEBAR_TAB_SWITCHES = { voices: 'show_voices_tab', lexicon: 'show_lexicon_tab' };
+var SIDEBAR_QUICK_ACTIONS = ['insert_from_selection', 'transform_divine_names', 'link_texts'];
+var SIDEBAR_OPTION_CONTROLS = [
+  'display', 'arrangement', 'citation', 'line_by_line', 'line_numbers',
+  'source_link', 'vowels', 'cantillation', 'hebrew_punctuation', 'transliteration',
+  'translation_link', 'translation_punctuation', 'commentary',
+  'title_fonts', 'text_fonts'
+];
+var SIDEBAR_CONTROL_KEYS = ['show_voices_tab', 'show_lexicon_tab', 'sidebar_quick_actions_hidden', 'sidebar_options_hidden'];
+
+function sidebarTabsFromPreferences(prefs) {
+  var p = prefs || {};
+  var tabs = ['texts'];
+  Object.keys(SIDEBAR_TAB_SWITCHES).forEach(function (tab) {
+    if (String(p[SIDEBAR_TAB_SWITCHES[tab]]) !== 'false') tabs.push(tab);
+  });
+  return tabs;
+}
+
+function sidebarHiddenIds(raw, known) {
+  var list = [];
+  try { list = JSON.parse(String(raw == null || raw === '' ? '[]' : raw)); } catch (e) { list = []; }
+  if (!Array.isArray(list)) list = [];
+  return known.filter(function (id) { return list.indexOf(id) >= 0; });
+}
+
+function sidebarControlsFromPreferences(prefs) {
+  var p = prefs || {};
+  return {
+    tabs: sidebarTabsFromPreferences(p),
+    quickActionsHidden: sidebarHiddenIds(p.sidebar_quick_actions_hidden, SIDEBAR_QUICK_ACTIONS),
+    optionsHidden: sidebarHiddenIds(p.sidebar_options_hidden, SIDEBAR_OPTION_CONTROLS)
+  };
+}
+
+// Whether a result tab is switched on, as the sidebar root says (the server
+// printed it; syncSidebarControls keeps it). Texts always is; so is every tab
+// on a page without the attribute.
+function sidebarTabIsOn(mode) {
+  if (mode === 'texts') return true;
+  var tabs = $('.unified-sidebar').attr('data-sidebar-tabs');
+  if (tabs == null) return true;
+  return String(tabs).split(/\s+/).indexOf(mode) >= 0;
+}
+
+function syncSidebarControls() {
+  var prefs = effectivePreferences || {};
+  var loaded = SIDEBAR_CONTROL_KEYS.some(function (key) {
+    return Object.prototype.hasOwnProperty.call(prefs, key);
+  });
+  // Before the settings arrive, keep what the server printed.
+  if (!loaded) return;
+  var controls = sidebarControlsFromPreferences(prefs);
+  $('.unified-sidebar')
+    .attr('data-sidebar-tabs', controls.tabs.join(' '))
+    .attr('data-quick-actions-hidden', controls.quickActionsHidden.join(' '))
+    .attr('data-options-hidden', controls.optionsHidden.join(' '));
 }
 
 function updateQuickActionsForMode() {
@@ -165,11 +295,17 @@ function updateQuickActionsForMode() {
   if (experimentalMode) { $('#footer-actions-panel').hide(); }
 }
 
+// Switching tabs never searches: the tab left keeps its results and its
+// selection, and the tab shown gets its own back (search-tabs).
 function setSidebarMode(mode, skipPreferenceSave) {
-  appMode = normalizeSidebarMode(mode);
-  if (appMode === 'experimental' && !hasExperimentalFeaturesEnabled()) {
-    appMode = 'texts';
+  var previousMode = appMode;
+  var nextMode = normalizeSidebarMode(mode);
+  if (nextMode === 'experimental' && !hasExperimentalFeaturesEnabled()) {
+    nextMode = 'texts';
   }
+  var changing = nextMode !== previousMode;
+  if (changing) stashSearchTab(previousMode);
+  appMode = nextMode;
 
   $('body').removeClass('mode-texts mode-voices mode-experimental mode-lexicon')
     .addClass('mode-' + appMode);
@@ -186,15 +322,15 @@ function setSidebarMode(mode, skipPreferenceSave) {
   if (appMode !== 'texts' && typeof closeLayoutTray === 'function') closeLayoutTray();
 
   $('.reference-row .search-submit, .reference-row .history-submit').show();
-  $('.advanced-version-details').toggle(appMode === 'texts' && $('.output-mode-selection').val() !== 'en');
   var placeholders = { texts: 'Search texts…', voices: 'Search voices…', lexicon: 'Search dictionary…' };
   $('.input').attr('placeholder', placeholders[appMode] || 'Search texts…');
-  var searchLabels = { voices: 'Source Sheets', lexicon: 'Lexicon entries' };
+  var searchLabels = { voices: 'Source Sheets' };
   $('.search-results-label').text(searchLabels[appMode] || 'Search results');
   var insertLabels = { voices: 'Add Sheet', lexicon: 'Add Entry' };
   $('#insert-source').text(insertLabels[appMode] || 'Add Source');
   var openLabels = { voices: 'Open Sheet' };
   $('.open-label-text').text(openLabels[appMode] || 'Open');
+  if (changing) showSearchTab(appMode);
 
   if (!skipPreferenceSave && appMode !== 'experimental') {
     saveAccountPreference({ search_mode: appMode });
@@ -212,7 +348,6 @@ function updateModeDependentSections() {
   var hasSelectedTextResult = appMode === 'texts' && !!selectedResultKey;
   var hasSelectedVoiceResult = appMode === 'voices' && !!selectedVoiceItem;
   var hasSelectedLexiconResult = appMode === 'lexicon' && !!selectedLexiconItem;
-  var hideTranslations = $('.translation-version-select option:not(:disabled)').length <= 1;
 
   if (appMode === 'experimental') {
     $('.results-panel, .versions-section, .preview-section, .inline-session-settings').hide();
@@ -223,10 +358,10 @@ function updateModeDependentSections() {
 
   $('.experimental-section').hide();
   $('.results-panel').toggle(hasSearch);
-  $('.versions-section').toggle(hasSelectedTextResult && !hideTranslations);
+  updateVersionControlsVisibility();
   // Show source card when a text result is selected
   $('.preview-section').toggle(hasSelectedTextResult);
-  $('.voices-preview-section').toggle(hasSelectedVoiceResult || hasSelectedLexiconResult);
+  $('.voices-preview-section').toggle(hasSelectedVoiceResult);
   // New redesign sections
   $('.source-card').toggle(hasSelectedTextResult);
   $('.unified-sidebar').toggleClass('has-selected-result', hasSelectedTextResult);
@@ -234,28 +369,20 @@ function updateModeDependentSections() {
   $('.inline-session-settings').toggle(hasSelectedTextResult);
   // Show Voices insert-mode selector only when a source sheet has been selected.
   $('.voices-insert-options').toggle(hasSelectedVoiceResult);
-  // Show Lexicon insert-mode selector only when a lexicon entry has been selected.
-  $('.lexicon-insert-options').toggle(hasSelectedLexiconResult);
+  // A word's entries, What to insert and the preview, while a word is selected.
+  $('.lexicon-word-section').toggle(hasSelectedLexiconResult);
   renderSessionLibrary();
 
-  // Render lexicon enhancement sections when in lexicon mode
-  if (appMode === 'lexicon') {
-    if (typeof renderLexiconHistory   === 'function') renderLexiconHistory();
-    if (typeof renderLexiconBookmarks === 'function') renderLexiconBookmarks();
-  }
+  // The Lexicon's recent searches, in the Lexicon.
+  if (appMode === 'lexicon' && typeof renderLexiconHistory === 'function') renderLexiconHistory();
 }
 
 
+// A tab: its own results for the text in the box, or the offer to search
+// them; never a search of its own. A search still running in the tab left
+// fills that tab only, and its hint or count stays there (BUG-005).
 $('.mode-switch-button, .experimental-menu-button').off('click').on('click', function () {
-  var nextMode = $(this).attr('data-sidebar-mode');
-  setSidebarMode(nextMode);
-  clearSelectedResult();
-  selectedVoiceItem = null;
-  selectedLexiconItem = null;
-  setInsertButtonState(false);
-  $('#open-on-sefaria').prop('disabled', true);
-  if (($('.input').val() || '').trim() && appMode !== 'experimental') runUnifiedQuery();
-  else updateModeDependentSections();
+  setSidebarMode($(this).attr('data-sidebar-mode'));
 });
 
 $('#open-session-library').off('click').on('click', function (event) {

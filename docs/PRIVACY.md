@@ -1,6 +1,11 @@
-# Privacy Policy — Torah Library Add-On for Google Docs
+# Data handling — Sefaria for Google Docs
 
-**Last updated: 2026-10-13**
+> **The policy users see is Sefaria's**, at <https://www.sefaria.org/privacy-policy>,
+> which is what the add-on and its listing link to. This file is the technical
+> account of what the add-on touches, sends and stores, kept for reviewers and
+> for checking that policy against the code.
+
+**Last updated: 2026-11-17**
 
 This add-on inserts texts from [Sefaria](https://www.sefaria.org) into your
 Google Doc. This policy describes exactly what data it touches, what leaves
@@ -12,7 +17,8 @@ Sefaria, and only the text you ask for (§2). Its windows also load their
 page resources — a script library, a stylesheet, fonts, and a few images —
 from Google and Sefaria, like any web page does (§2.2). It stores only your
 own preference settings, in Google's per-user storage for this add-on, and
-your sidebar history, in your own browser (§3).
+your sidebar history, in your own browser — except that the Session Library's
+list passes briefly through Google when you open and close its window (§3).
 
 ---
 
@@ -38,21 +44,20 @@ the following — is sent to `https://www.sefaria.org`:
 
 | When | What is sent |
 | --- | --- |
-| You search for a text | Your search terms. |
+| You search for a text | Your search terms. With a translation-language filter selected, the add-on also checks candidate Sefaria references for translation text. |
 | You select or insert a source | The reference you selected (e.g. `Genesis 1:1`). |
 | You look up a word in the Lexicon | The word you looked up. |
 | You search Voices (source sheets) | Your search terms. |
-| You run **Link Texts with Sefaria** | Text from your document — see §2.1 below. |
+| You run **Link Texts with Sefaria** or **Insert Source from Selection** | Text from your document or its selection — see §2.1 below. |
 
-Your search terms and references are of course things you typed on purpose.
-The linker is the one feature that sends text you did not explicitly hand
-over, so it gets its own section.
+You enter your search terms or select a source. The citation-detection
+commands that send document text are described below.
 
 ### 2.1 The "Link Texts with Sefaria" feature
 
-This feature finds citations already written in your document and turns them
-into Sefaria hyperlinks. To do that, Sefaria's reference-linker service has to
-see the text.
+These commands use Sefaria’s reference linker to identify citations. Link
+Texts can turn those citations into hyperlinks. Insert Source from Selection
+sends the selected text to resolve a source and opens a review before insertion.
 
 You control how much text is sent, in **Preferences → Linking → Privacy &
 Document Scanning**:
@@ -64,9 +69,14 @@ Document Scanning**:
   abbreviation. Only those passages, plus a small amount of surrounding
   context needed to resolve them, are uploaded. Paragraphs of your own
   writing that contain no citation are never transmitted.
-- **Whole document.** The entire body text of the document is uploaded. This
+- **Whole document.** The entire highlighted selection, or the body text of the current document tab if nothing is highlighted, is uploaded. This
   can catch unusual citation forms the local scan misses. This was the
   add-on's original behavior.
+
+If Sefaria's linker can't match a citation it found, the add-on looks that
+citation up again in other spellings, as the search box does. Those lookups
+send only the citation's own words (for example `Hil. Shabbat 1:1`), which
+were already part of what was uploaded.
 
 In either mode, nothing is uploaded until you explicitly run the command.
 Sefaria receives the text; it does not receive your name, your email address,
@@ -89,10 +99,10 @@ document, your searches, or your settings.**
 | `ajax.googleapis.com` (Google) | The jQuery script library, pinned to one version and checked with a Subresource Integrity hash | Every sidebar and dialog |
 | `ssl.gstatic.com` (Google) | Google's standard add-on stylesheet | Every sidebar and dialog |
 | `fonts.googleapis.com`, `fonts.gstatic.com` (Google) | The page's display fonts, and the fonts its previews are drawn in: the font you pick from the add-on's list, or the font your document uses when it is one of the Google Fonts the add-on knows (Hebrew fonts, Crimson Text, EB Garamond, Roboto). The request names the font, and nothing else from your document. | Windows that use them |
-| `www.sefaria.org` | The Sefaria logo in the sidebar footer and a loading animation | Sidebar, Preferences, Surprise Me |
+| `www.sefaria.org` | The Sefaria logo in the sidebar footer | Sidebar |
 | `sefaria.formstack.com` | Sefaria's feedback form, embedded in the dialog | Only when you open **Send Feedback**; anything you type into that form goes to Sefaria under their policy |
 
-Links in Help & Support and Release Notes (GitHub, Wikipedia, Sefaria's Help
+Links in Help and Release Notes (GitHub, Wikipedia, Sefaria's Help
 Center) open only if you click them.
 
 The add-on's own icons are bundled into the add-on and load from nowhere.
@@ -105,18 +115,43 @@ by your browser from us.
 settings, default insertion options — are stored using Google's
 `PropertiesService` user storage. This is per-user, per-add-on storage
 managed by Google. It is not readable by other add-ons, by other users, or by
-the add-on's authors.
+the add-on's authors. Settings saved for This Document use a hashed
+document identifier in the same private storage.
+
+**Settings files.** Preferences → Details → ⇅ Import/Export → *Export settings file* saves
+your preference settings (no searches, document text or account details) to
+a file on your own computer, built from your preferences by Google's Apps
+Script service and downloaded by your browser. Who receives the file is up
+to you. *Import* reads a file you choose in your browser and sends its text
+to Google's Apps Script service, which writes only recognised preference
+settings to your `PropertiesService` storage; the file is not kept. In Everything, the selected profile is the target; shared settings are included only by choice. A transfer never changes the interface mode.
 
 **Sidebar session state** — the temporary choices you make in a single
 sidebar session — is stored in Google's `CacheService` and expires
 automatically within 6 hours.
 
-**Your sidebar history** — the Session Library (sources you inserted or
-pinned), recent searches, and recent and starred Lexicon entries — is kept in
-your own browser's local storage, on the computer you used. It never leaves
-that browser and is not synced to other computers. **Reset Session** in the
-Session Library clears the Session Library; clearing your browser's site data
-removes all of it.
+**Your sidebar history** — the Session Library (sources, source sheets and
+dictionary words you inserted or pinned), recent searches, and recent Lexicon
+searches — is kept in your own browser's local storage, on the computer you
+used, and is not synced to other computers. Recent searches never leave that
+browser. (Lexicon words starred in earlier versions are moved into the Session
+Library's pins, in the same storage, the next time the sidebar opens.)
+
+The Session Library is the one exception: it opens in a separate window,
+which the add-on can only fill, and read back, through Google Apps Script. When you open that window, the list — each source's reference,
+title and link, and the search text that found it; for a source sheet also its
+author, topics and Sefaria's summary of it — is sent to Google's Apps
+Script service to build the window. When you close it, the list as you left
+it is put in Google's per-user `CacheService` storage for this add-on, where
+the sidebar collects it, normally within a few seconds, and then deletes it;
+if it is never collected it expires within an hour. (Versions before
+30 October 2026 kept that copy in `PropertiesService` until you next opened
+the window; opening it still deletes any such copy.) The list is not stored
+anywhere else, and the add-on's authors cannot read it. If the window can't
+open, the sidebar shows the list itself, and then nothing leaves the browser.
+
+**Reset Session** in the Session Library clears the Session Library; clearing
+your browser's site data removes all of the sidebar history.
 
 **Nothing else is stored.** Specifically:
 
@@ -150,14 +185,13 @@ without any of that data.
 ## 6. Data retention and deletion
 
 Apart from the browser-side sidebar history described in §3, the add-on
-retains only your preference settings. To delete them:
+retains only your preference settings. **Preferences → Details → Reset
+options** replaces saved settings in the selected scope. Uninstalling the
+add-on removes its `PropertiesService` storage.
 
-- Use **Preferences → Reset To Defaults** to restore defaults, or
-- Uninstall the add-on. Google removes the add-on's `PropertiesService`
-  storage when you uninstall it.
-
-Cached sidebar session state expires on its own within 6 hours and requires
-no action.
+Cached sidebar session state expires on its own within 6 hours, and the
+Session Library window's hand-off (§3) is deleted when the sidebar collects it
+or expires within an hour; neither requires any action.
 
 ## 7. Children
 
@@ -175,7 +209,7 @@ listing.
 ## 9. Contact
 
 Questions about this policy, or about the add-on's data handling:
-**help@the-merkaz.org**. The add-on's source code is public at
+[Sefaria's Help Center](https://help.sefaria.org/hc/en-us/sections/20235182393244). The add-on's source code is public at
 <https://github.com/TheMerkazDev/TorahLibraryAddOnForDocs>.
 
 ---
@@ -193,3 +227,7 @@ Every statement above is checkable against the source, which is public:
 - The absence of user-identity access is checkable:
   `grep -rn "getActiveUser\|getEffectiveUser\|getEmail" apps-script/`
   returns nothing.
+
+### Selection scope
+
+Link Texts limits scanning to a highlighted selection when present, subject to the selected scanning preference. Without a selection it scans the body of the current document tab. Insert Source from Selection sends the selected text to Sefaria for citation resolution, with the same up-front disclosure. Selection placement identifiers are local to the review workflow and are not included in the Sefaria request. Clear the selection before running Link Texts to scan the whole body.

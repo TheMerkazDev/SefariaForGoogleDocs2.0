@@ -18,6 +18,11 @@
       "definedIn": "apps-script/server/preferences.gs"
     },
     {
+      "name": "cloneAccountSettingsForDocument",
+      "arity": 1,
+      "definedIn": "apps-script/server/document-preferences.gs"
+    },
+    {
       "name": "findReference",
       "arity": 3,
       "definedIn": "apps-script/server/sefaria-fetch.gs"
@@ -33,9 +38,19 @@
       "definedIn": "apps-script/server/search.gs"
     },
     {
+      "name": "getAccountPreferences",
+      "arity": 0,
+      "definedIn": "apps-script/server/preferences.gs"
+    },
+    {
       "name": "getDefaultPreferences",
       "arity": 0,
       "definedIn": "apps-script/server/preferences.gs"
+    },
+    {
+      "name": "getDocumentPreferenceProfile",
+      "arity": 0,
+      "definedIn": "apps-script/server/document-preferences.gs"
     },
     {
       "name": "getInsertionPointFont",
@@ -56,6 +71,11 @@
       "name": "getSidebarBootstrapData",
       "arity": 2,
       "definedIn": "apps-script/server/menu.gs"
+    },
+    {
+      "name": "getSearchTranslationMatches",
+      "arity": 2,
+      "definedIn": "apps-script/server/search.gs"
     },
     {
       "name": "getTranslationAvailability",
@@ -109,7 +129,7 @@
     },
     {
       "name": "previewTransliterationWithOverrides",
-      "arity": 2,
+      "arity": 3,
       "definedIn": "apps-script/transliteration.gs"
     },
     {
@@ -189,7 +209,7 @@
     },
     {
       "name": "scanDocumentForReferences",
-      "arity": 0,
+      "arity": 1,
       "definedIn": "apps-script/server/document-actions.gs"
     },
     {
@@ -213,9 +233,94 @@
       "definedIn": "apps-script/server/first-run.gs"
     },
     {
+      "name": "restorePreferencePreset",
+      "arity": 2,
+      "definedIn": "apps-script/server/factory-preferences.gs"
+    },
+    {
+      "name": "saveDocumentPreferenceProfile",
+      "arity": 2,
+      "definedIn": "apps-script/server/document-preferences.gs"
+    },
+    {
+      "name": "savePreferenceDefaults",
+      "arity": 2,
+      "definedIn": "apps-script/server/factory-preferences.gs"
+    },
+    {
+      "name": "resetPreferencesToDefaults",
+      "arity": 0,
+      "definedIn": "apps-script/server/first-run.gs"
+    },
+    {
+      "name": "exportSettingsFile",
+      "arity": 2,
+      "definedIn": "apps-script/server/settings-file.gs"
+    },
+    {
+      "name": "previewSettingsImport",
+      "arity": 1,
+      "definedIn": "apps-script/server/settings-file.gs"
+    },
+    {
+      "name": "applySettingsImport",
+      "arity": 2,
+      "definedIn": "apps-script/server/settings-file.gs"
+    },
+    {
       "name": "releaseNotesPopup",
       "arity": 0,
       "definedIn": "apps-script/server/menu.gs"
+    },
+    {
+      "name": "createSettingsProfile",
+      "arity": 1,
+      "definedIn": "apps-script/server/settings-profiles.gs"
+    },
+    {
+      "name": "deleteSettingsProfile",
+      "arity": 1,
+      "definedIn": "apps-script/server/settings-profiles.gs"
+    },
+    {
+      "name": "getSettingsProfiles",
+      "arity": 0,
+      "definedIn": "apps-script/server/settings-profiles.gs"
+    },
+    {
+      "name": "renameSettingsProfile",
+      "arity": 2,
+      "definedIn": "apps-script/server/settings-profiles.gs"
+    },
+    {
+      "name": "switchSettingsProfile",
+      "arity": 1,
+      "definedIn": "apps-script/server/settings-profiles.gs"
+    },
+    {
+      "name": "searchSelectedSources",
+      "arity": 1,
+      "definedIn": "apps-script/server/document-actions.gs"
+    },
+    {
+      "name": "restartFirstRunSetup",
+      "arity": 1,
+      "definedIn": "apps-script/server/first-run.gs"
+    },
+    {
+      "name": "exportSettingsForTarget",
+      "arity": 3,
+      "definedIn": "apps-script/server/settings-file.gs"
+    },
+    {
+      "name": "previewSettingsImportForTarget",
+      "arity": 2,
+      "definedIn": "apps-script/server/settings-file.gs"
+    },
+    {
+      "name": "applySettingsImportForTarget",
+      "arity": 3,
+      "definedIn": "apps-script/server/settings-file.gs"
     }
   ]
 }

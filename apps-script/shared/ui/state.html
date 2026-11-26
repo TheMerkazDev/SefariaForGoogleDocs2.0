@@ -5,6 +5,23 @@
     return window.APP_CONFIG || {};
   }
 
+  function sidebarPreferenceChannel() {
+    var scope = getAppConfig().sidebarPreferenceScope;
+    if (!scope) return '';
+    // sessionStorage is scoped to the browser tab. The document scope
+    // separately distinguishes Docs tabs sharing that browsing context.
+    try {
+      var key = 'sefariaSidebarPreferenceBrowserTab';
+      var tab = window.sessionStorage.getItem(key);
+      if (!tab) {
+        tab = String(Date.now()) + ':' + Math.random();
+        window.sessionStorage.setItem(key, tab);
+      }
+      return 'sefariaSidebarPreferences:' + scope + ':' + tab;
+    } catch (error) { return ''; }
+  }
+
+
   function isTextsMode(mode) {
     return String(mode || '') === 'texts';
   }
@@ -95,32 +112,260 @@
     });
   }
 
+  // ── Lexicon dictionaries ─────────────────────────────────────────────────
+  // The Lexicon's counterpart of the corpora: the order a word's entries are
+  // listed in, and the dictionaries left out (lexicon_dictionary_order /
+  // lexicon_dictionary_excluded; Preferences → Search edits them, the
+  // sidebar's dictionary chips show or hide one for a single search). Labels
+  // are the names server/lexicon.gs gives the dictionaries (lexiconShortName_).
+  // A dictionary missing from this list still shows, after every listed one.
+  var LEXICON_DICTIONARY_CATALOG = [
+    { key: 'dictionary-klein', label: 'Klein', note: 'Modern Hebrew, with etymologies' },
+    { key: 'dictionary-bdb', label: 'BDB', note: 'Biblical Hebrew (Brown, Driver & Briggs)' },
+    { key: 'dictionary-bdb-aramaic', label: 'BDB Aramaic', note: 'Biblical Aramaic' },
+    { key: 'dictionary-jastrow', label: 'Jastrow', note: 'Talmud, Midrash and Targum' },
+    { key: 'dictionary-strongs', label: "Strong's", note: 'Short biblical definitions, by Strong’s number' },
+    { key: 'dictionary-ben-yehuda', label: 'Ben-Yehuda', note: 'In Hebrew' }
+  ];
+
+  function isKnownLexiconDictionaryKey(key) {
+    return LEXICON_DICTIONARY_CATALOG.some(function (entry) { return entry.key === key; });
+  }
+
+  // Stored order → the full catalog order, as normalizeSearchCorpusOrder.
+  function normalizeLexiconDictionaryOrder(value) {
+    var seen = {};
+    var out = [];
+    parseStoredArrayPreference(value, []).forEach(function (key) {
+      key = String(key || '').trim();
+      if (!isKnownLexiconDictionaryKey(key) || seen[key]) return;
+      seen[key] = true;
+      out.push(key);
+    });
+    LEXICON_DICTIONARY_CATALOG.forEach(function (entry) {
+      if (!seen[entry.key]) out.push(entry.key);
+    });
+    return out;
+  }
+
+  // Stored exclusions → the dictionary keys hidden from the Lexicon.
+  function normalizeLexiconDictionaryExcluded(value) {
+    var seen = {};
+    return parseStoredArrayPreference(value, []).map(function (key) {
+      return String(key || '').trim();
+    }).filter(function (key) {
+      if (!key || key.indexOf('dictionary-') !== 0 || seen[key]) return false;
+      seen[key] = true;
+      return true;
+    });
+  }
+
+  // ── Voices topic categories ──────────────────────────────────────────────
+  // The Voices tab's counterpart of the corpora: a source sheet is filed under
+  // the first of these its topics fit (Sefaria's topics_en, in their order;
+  // a sheet whose topics fit none is tried by its title), else under Other.
+  // Its results are grouped by category in the saved order, and categories
+  // can be left out (voices_topic_order / voices_topic_excluded; Preferences
+  // → Search edits them, a group's ❌ or the sidebar's topic chips hide or
+  // show one for a single search). A keyword matches whole words, case,
+  // accents and punctuation aside, and its plural too; when a topic fits
+  // several categories the longest keyword decides ("Torah Study" is Values,
+  // not Tanakh; "Laws of Shabbat" is Halakhah), then the catalog order, which
+  // is also the built-in display order. `accent` borrows a corpus colour.
+  var VOICES_OTHER_TOPIC_KEY = 'topic-other';
+  var VOICES_TOPIC_CATALOG = [
+    { key: 'topic-torah-portions', label: 'Torah Portions', accent: 'tanakh', note: 'The weekly parashah',
+      keywords: ['parashah', 'parasha', 'parsha', 'parashat', 'parshat', 'torah portion', 'weekly torah portion',
+        'bereshit', 'bereishit', 'noach', 'lech lecha', 'lekh lekha', 'vayera', 'chayei sara', 'chayei sarah', 'toldot',
+        'vayetzei', 'vayishlach', 'vayeshev', 'miketz', 'vayigash', 'vayechi', 'shemot', 'vaera', 'bo', 'beshalach',
+        'yitro', 'mishpatim', 'terumah', 'tetzaveh', 'ki tisa', 'vayakhel', 'pekudei', 'vayikra', 'tzav', 'shmini',
+        'shemini', 'tazria', 'metzora', 'achrei mot', 'acharei mot', 'kedoshim', 'emor', 'behar', 'bechukotai',
+        'bamidbar', 'nasso', 'naso', 'beha alotcha', 'behaalotecha', 'shelach', 'shlach', 'korach', 'chukat', 'balak',
+        'pinchas', 'matot', 'masei', 'devarim', 'vaetchanan', 'eikev', 'ekev', 're eh', 'reeh', 'shoftim', 'ki teitzei',
+        'ki tetzei', 'ki tavo', 'nitzavim', 'vayeilech', 'vayelech', 'ha azinu', 'haazinu', 'vezot haberakhah',
+        'vezot haberacha'] },
+    { key: 'topic-holidays', label: 'Shabbat & Holidays', accent: 'liturgy', note: 'Shabbat, the festivals and fasts',
+      keywords: ['shabbat', 'sabbath', 'holiday', 'holidays', 'festival', 'festivals', 'high holidays', 'high holy days',
+        'rosh hashanah', 'rosh hashana', 'yom kippur', 'sukkot', 'sukkah', 'shemini atzeret', 'simchat torah',
+        'chanukah', 'hanukkah', 'hanukah', 'purim', 'passover', 'pesach', 'seder', 'haggadah', 'shavuot', 'omer',
+        'lag baomer', 'tisha b av', 'tisha bav', 'three weeks', 'tu bishvat', 'tu b shvat', 'rosh chodesh', 'elul',
+        'yom haatzmaut', 'yom hashoah', 'yom hazikaron', 'fast days', 'fast day', 'havdalah', 'kiddush'] },
+    { key: 'topic-prayer', label: 'Prayer', accent: 'liturgy', note: 'Prayer, blessings and the siddur',
+      keywords: ['prayer', 'prayers', 'tefillah', 'tefila', 'siddur', 'liturgy', 'blessing', 'berakhah', 'berachah',
+        'brachot', 'berakhot', 'shema', 'amidah', 'kaddish', 'hallel', 'piyyut', 'synagogue', 'minyan', 'davening'] },
+    { key: 'topic-life-cycle', label: 'Life Cycle', note: 'Birth, coming of age, marriage, mourning',
+      keywords: ['life cycle', 'lifecycle', 'birth', 'brit milah', 'circumcision', 'naming', 'bar mitzvah',
+        'bat mitzvah', 'bnai mitzvah', 'b nai mitzvah', 'marriage', 'wedding', 'divorce', 'death', 'dying', 'mourning',
+        'funeral', 'shiva', 'burial', 'conversion', 'aging', 'family', 'parents', 'children'] },
+    { key: 'topic-halakhah', label: 'Halakhah', accent: 'halakhah', note: 'Jewish law and the mitzvot',
+      keywords: ['halakhah', 'halakha', 'halacha', 'halachah', 'jewish law', 'laws of', 'law', 'mitzvah', 'mitzvot',
+        'commandment', 'kashrut', 'kosher', 'tzitzit', 'tefillin', 'mezuzah', 'tzedakah laws', 'responsa',
+        'shulchan arukh', 'shulchan aruch', 'mishneh torah'] },
+    { key: 'topic-tanakh', label: 'Tanakh', accent: 'tanakh', note: 'The Torah, Prophets and Writings',
+      keywords: ['tanakh', 'tanach', 'torah', 'bible', 'hebrew bible', 'genesis', 'exodus', 'leviticus', 'numbers',
+        'deuteronomy', 'prophets', 'prophecy', 'writings', 'joshua', 'judges', 'samuel', 'kings', 'isaiah', 'jeremiah',
+        'ezekiel', 'hosea', 'joel', 'amos', 'obadiah', 'jonah', 'micah', 'nahum', 'habakkuk', 'zephaniah', 'haggai',
+        'zechariah', 'malachi', 'psalms', 'psalm', 'tehillim', 'proverbs', 'job', 'song of songs', 'ruth',
+        'lamentations', 'ecclesiastes', 'kohelet', 'esther', 'daniel', 'ezra', 'nehemiah', 'chronicles'] },
+    { key: 'topic-talmud', label: 'Talmud & Midrash', accent: 'talmud', note: 'Mishnah, Talmud and Midrash',
+      keywords: ['talmud', 'gemara', 'mishnah', 'mishna', 'tractate', 'daf yomi', 'midrash', 'aggadah', 'aggada',
+        'rabbinic literature', 'pirkei avot', 'avot', 'tosefta'] },
+    { key: 'topic-people', label: 'People', note: 'Biblical figures, sages and teachers',
+      keywords: ['adam', 'eve', 'cain', 'abel', 'noah', 'abraham', 'sarah', 'isaac', 'rebecca', 'rebekah', 'jacob',
+        'rachel', 'leah', 'joseph', 'judah', 'moses', 'aaron', 'miriam', 'pharaoh', 'yitro jethro', 'jethro',
+        'joshua bin nun', 'deborah', 'samson', 'hannah', 'saul', 'david', 'solomon', 'elijah', 'elisha', 'king david',
+        'hillel', 'shammai', 'rabbi akiva', 'akiva', 'rabbi akiba', 'rashi', 'rambam', 'maimonides', 'ramban',
+        'nachmanides', 'baal shem tov', 'matriarchs', 'patriarchs', 'sages', 'rabbis'] },
+    { key: 'topic-thought', label: 'Jewish Thought', accent: 'kabbalah', note: 'Philosophy, theology, Kabbalah, Chasidut',
+      keywords: ['jewish thought', 'philosophy', 'theology', 'god', 'faith', 'belief', 'free will', 'creation',
+        'revelation', 'redemption', 'messiah', 'soul', 'afterlife', 'olam haba', 'world to come', 'evil', 'suffering',
+        'kabbalah', 'mysticism', 'zohar', 'chasidut', 'hasidut', 'hasidism', 'chassidut', 'musar', 'mussar'] },
+    { key: 'topic-values', label: 'Values & Ethics', accent: 'musar', note: 'Kindness, justice, speech, character',
+      keywords: ['values', 'ethics', 'morality', 'kindness', 'chesed', 'charity', 'tzedakah', 'justice',
+        'social justice', 'tikkun olam', 'peace', 'love', 'truth', 'honesty', 'humility', 'gratitude', 'compassion',
+        'forgiveness', 'repentance', 'teshuvah', 'leadership', 'responsibility', 'speech', 'lashon hara', 'anger',
+        'pride', 'joy', 'happiness', 'environment', 'animals', 'hospitality', 'education', 'learning', 'torah study'] },
+    { key: 'topic-israel', label: 'Israel & History', accent: 'midrash', note: 'The Land of Israel, Jerusalem, Jewish history',
+      keywords: ['israel', 'land of israel', 'eretz yisrael', 'jerusalem', 'temple', 'holy temple', 'beit hamikdash',
+        'zionism', 'exile', 'diaspora', 'history', 'jewish history', 'holocaust', 'shoah', 'antisemitism'] },
+    { key: VOICES_OTHER_TOPIC_KEY, label: 'Other', note: 'Sheets whose topics fit none of the above' }
+  ];
+
+  function voicesTopicMatchText_(value) {
+    return ' ' + String(value || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+      .replace(/[^a-z0-9]+/g, ' ').trim() + ' ';
+  }
+
+  // The catalog entry a sheet is filed under ({ key, label, accent }).
+  function voicesTopicCategoryOf(sheet) {
+    var candidates = (Array.isArray(sheet && sheet.topics) ? sheet.topics : [])
+      .map(function (topic) { return topic && typeof topic === 'object' ? (topic.en || topic.title || '') : topic; })
+      .concat([sheet && (sheet.label || sheet.title) || '']);
+    for (var i = 0; i < candidates.length; i++) {
+      var text = voicesTopicMatchText_(candidates[i]);
+      if (text === '  ') continue;
+      var best = null;
+      var bestScore = 0;
+      VOICES_TOPIC_CATALOG.forEach(function (category) {
+        (category.keywords || []).forEach(function (keyword) {
+          var word = voicesTopicMatchText_(keyword).trim();
+          if (text.indexOf(' ' + word + ' ') < 0 && text.indexOf(' ' + word + 's ') < 0) return;
+          var score = word.split(' ').length * 100 + word.length;
+          if (score > bestScore) { best = category; bestScore = score; }
+        });
+      });
+      if (best) return best;
+    }
+    return VOICES_TOPIC_CATALOG[VOICES_TOPIC_CATALOG.length - 1];
+  }
+
+  function isKnownVoicesTopicKey(key) {
+    return VOICES_TOPIC_CATALOG.some(function (entry) { return entry.key === key; });
+  }
+
+  // Stored order → the full catalog order, as normalizeSearchCorpusOrder.
+  function normalizeVoicesTopicOrder(value) {
+    var seen = {};
+    var out = [];
+    parseStoredArrayPreference(value, []).forEach(function (key) {
+      key = String(key || '').trim();
+      if (!isKnownVoicesTopicKey(key) || seen[key]) return;
+      seen[key] = true;
+      out.push(key);
+    });
+    VOICES_TOPIC_CATALOG.forEach(function (entry) {
+      if (!seen[entry.key]) out.push(entry.key);
+    });
+    return out;
+  }
+
+  // Stored exclusions → the topic categories hidden from Voices.
+  function normalizeVoicesTopicExcluded(value) {
+    var seen = {};
+    return parseStoredArrayPreference(value, []).map(function (key) {
+      return String(key || '').trim();
+    }).filter(function (key) {
+      if (!isKnownVoicesTopicKey(key) || seen[key]) return false;
+      seen[key] = true;
+      return true;
+    });
+  }
+
   // ── Translation languages ────────────────────────────────────────────────
   // The languages the sidebar's search language filter offers (its static
   // rows in sidebar.html use these codes). The hidden_translation_languages
   // preference (JSON array of codes) leaves some out of that filter and out
   // of the translation version list. Shared by the sidebar and Preferences.
+  //
+  // `names`: what else a reader might type for the language in the version
+  // list's filter box (translationLanguageCodesMatching): its name in each
+  // catalog language that has one in CLDR, the Unicode locale data browsers
+  // use (Hebrew, Arabic, Czech, Esperanto, Persian, Finnish, French, German,
+  // Hungarian, Italian, Korean, Polish, Portuguese, Russian, Spanish, Yiddish,
+  // in that order), then other names in use (Italkian, Judezmo, אידיש). The
+  // label and the code count too. No name may belong to two languages
+  // (test/tests/translation-language-names.test.js).
   var TRANSLATION_LANGUAGE_CATALOG = [
-    { code: 'en', label: 'English' },
-    { code: 'he', label: 'Hebrew' },
-    { code: 'ar', label: 'Arabic' },
-    { code: 'cs', label: 'Czech' },
-    { code: 'eo', label: 'Esperanto' },
-    { code: 'fa', label: 'Farsi (Persian)' },
-    { code: 'fi', label: 'Finnish' },
-    { code: 'fr', label: 'French' },
-    { code: 'de', label: 'German' },
-    { code: 'hu', label: 'Hungarian' },
-    { code: 'it', label: 'Italian' },
-    { code: 'itk', label: 'Judeo-Italian' },
-    { code: 'jrb', label: 'Judeo-Arabic' },
-    { code: 'ko', label: 'Korean' },
-    { code: 'lad', label: 'Ladino (Judeo-Spanish)' },
-    { code: 'pl', label: 'Polish' },
-    { code: 'pt', label: 'Portuguese' },
-    { code: 'ru', label: 'Russian' },
-    { code: 'es', label: 'Spanish' },
-    { code: 'yi', label: 'Yiddish' }
+    { code: 'en', label: 'English',
+      names: ['אנגלית', 'الإنجليزية', 'angličtina', 'angla', 'انگلیسی', 'englanti', 'anglais', 'Englisch', 'angol',
+        'inglese', '영어', 'angielski', 'inglês', 'английский', 'ענגליש'] },
+    { code: 'he', label: 'Hebrew',
+      names: ['עברית', 'العبرية', 'hebrejština', 'hebrea', 'عبری', 'heprea', 'hébreu', 'Hebräisch', 'héber',
+        'ebraico', '히브리어', 'hebrajski', 'hebraico', 'иврит', 'hebreo', 'העברעאיש'] },
+    { code: 'ar', label: 'Arabic',
+      names: ['ערבית', 'العربية', 'arabština', 'araba', 'عربی', 'arabia', 'arabe', 'Arabisch', 'arab', 'arabo',
+        '아랍어', 'arabski', 'арабский', 'אַראַביש'] },
+    { code: 'cs', label: 'Czech',
+      names: ['צ׳כית', 'التشيكية', 'čeština', 'ĉeĥa', 'چکی', 'tšekki', 'tchèque', 'Tschechisch', 'cseh', 'ceco',
+        '체코어', 'czeski', 'tcheco', 'чешский', 'checo', 'טשעכיש'] },
+    { code: 'eo', label: 'Esperanto',
+      names: ['אספרנטו', 'الإسبرانتو', 'اسپرانتو', 'eszperantó', '에스페란토어', 'эсперанто', 'עספּעראַנטא'] },
+    { code: 'fa', label: 'Farsi (Persian)',
+      names: ['פרסית', 'الفارسية', 'perština', 'persa', 'فارسی', 'persia', 'persan', 'Persisch', 'perzsa',
+        'persiano', '페르시아어', 'perski', 'персидский', 'פּערסיש'] },
+    { code: 'fi', label: 'Finnish',
+      names: ['פינית', 'الفنلندية', 'finština', 'finna', 'فنلاندی', 'suomi', 'finnois', 'Finnisch', 'finn',
+        'finlandese', '핀란드어', 'fiński', 'finlandês', 'финский', 'finés', 'פֿיניש'] },
+    { code: 'fr', label: 'French',
+      names: ['צרפתית', 'الفرنسية', 'francouzština', 'franca', 'فرانسوی', 'ranska', 'français', 'Französisch',
+        'francia', 'francese', '프랑스어', 'francuski', 'francês', 'французский', 'פֿראַנצויזיש'] },
+    { code: 'de', label: 'German',
+      names: ['גרמנית', 'الألمانية', 'němčina', 'germana', 'آلمانی', 'saksa', 'allemand', 'Deutsch', 'német',
+        'tedesco', '독일어', 'niemiecki', 'alemão', 'немецкий', 'alemán', 'דײַטש'] },
+    { code: 'hu', label: 'Hungarian',
+      names: ['הונגרית', 'الهنغارية', 'maďarština', 'hungara', 'مجاری', 'unkari', 'hongrois', 'Ungarisch',
+        'magyar', 'ungherese', '헝가리어', 'węgierski', 'húngaro', 'венгерский', 'אונגעריש'] },
+    { code: 'it', label: 'Italian',
+      names: ['איטלקית', 'الإيطالية', 'italština', 'itala', 'ایتالیایی', 'italia', 'italien', 'Italienisch',
+        'olasz', 'italiano', '이탈리아어', 'włoski', 'итальянский', 'איטאַליעניש'] },
+    { code: 'itk', label: 'Judeo-Italian',
+      names: ['Italkian', 'giudeo-italiano', 'איטלקית יהודית'] },
+    { code: 'jrb', label: 'Judeo-Arabic',
+      names: ['ערבית יהודית', 'العربية اليهودية', 'judeoarabština', 'عربی یهودی', 'juutalaisarabia', 'judéo-arabe',
+        'Jüdisch-Arabisch', 'zsidó-arab', 'giudeo arabo', '유대-아라비아어', 'judeoarabski', 'judaico-arábico',
+        'еврейско-арабский'] },
+    { code: 'ko', label: 'Korean',
+      names: ['קוריאנית', 'الكورية', 'korejština', 'korea', 'کره\u200cای', 'coréen', 'Koreanisch', 'koreai', 'coreano',
+        '한국어', 'koreański', 'корейский', 'קארעאיש'] },
+    { code: 'lad', label: 'Ladino (Judeo-Spanish)',
+      names: ['לדינו', 'اللادينو', 'ladinština', 'judhispana', 'لادینو', 'giudeo-spagnolo', '라디노어', 'ladyński',
+        'ладино', 'לאַדינא', 'Judezmo', 'djudeo-espanyol', 'ספניולית'] },
+    { code: 'pl', label: 'Polish',
+      names: ['פולנית', 'البولندية', 'polština', 'pola', 'لهستانی', 'puola', 'polonais', 'Polnisch', 'lengyel',
+        'polacco', '폴란드어', 'polski', 'polonês', 'польский', 'polaco', 'פּויליש'] },
+    { code: 'pt', label: 'Portuguese',
+      names: ['פורטוגזית', 'البرتغالية', 'portugalština', 'portugala', 'پرتغالی', 'portugali', 'portugais',
+        'Portugiesisch', 'portugál', 'portoghese', '포르투갈어', 'portugalski', 'português', 'португальский',
+        'פּארטוגעזיש'] },
+    { code: 'ru', label: 'Russian',
+      names: ['רוסית', 'الروسية', 'ruština', 'rusa', 'روسی', 'venäjä', 'russe', 'Russisch', 'orosz', 'russo',
+        '러시아어', 'rosyjski', 'русский', 'ruso', 'רוסיש'] },
+    { code: 'es', label: 'Spanish',
+      names: ['ספרדית', 'الإسبانية', 'španělština', 'hispana', 'اسپانیایی', 'espanja', 'espagnol', 'Spanisch',
+        'spanyol', 'spagnolo', '스페인어', 'hiszpański', 'espanhol', 'испанский', 'español', 'שפּאַניש'] },
+    { code: 'yi', label: 'Yiddish',
+      names: ['יידיש', 'اليديشية', 'jidiš', 'judgermana', 'یدی', 'jiddiš', 'Jiddisch', '이디시어', 'jidysz', 'iídiche',
+        'идиш', 'yidis', 'Yidish', 'אידיש'] }
   ];
 
   // Stored value → list of hidden language codes (unknown codes dropped).
@@ -134,5 +379,52 @@
       seen[code] = true;
       return true;
     });
+  }
+
+  // A language name as the filter box compares it: case, accents, vowel points
+  // and apostrophes aside (francais = français, יידיש = ייִדיש, צ'כית = צ׳כית),
+  // any other punctuation a space (judeo spanish = Judeo-Spanish).
+  function foldTranslationLanguageName(value) {
+    return String(value || '').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
+      .replace(/ł/g, 'l').replace(/ײ/g, 'יי').replace(/װ/g, 'וו').replace(/ױ/g, 'וי')
+      .replace(/['‘’ʼ`׳"״\u200c\u200d]/g, '')
+      .replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  }
+
+  var translationLanguageNameIndex_ = null;
+
+  // Every catalog name, folded: [{ name, code }]. Built once.
+  function translationLanguageNameIndex() {
+    if (translationLanguageNameIndex_) return translationLanguageNameIndex_;
+    var index = [];
+    TRANSLATION_LANGUAGE_CATALOG.forEach(function (lang) {
+      // 'Farsi (Persian)' is two names.
+      lang.label.split(/[()]/).concat(lang.names || []).forEach(function (name) {
+        var folded = foldTranslationLanguageName(name);
+        if (!folded) return;
+        index.push({ name: folded, code: lang.code });
+        // An Arabic name carries the article: العربية is also typed عربية.
+        if (/^ال./.test(folded)) index.push({ name: folded.slice(2), code: lang.code });
+      });
+    });
+    translationLanguageNameIndex_ = index;
+    return index;
+  }
+
+  // The catalog languages a filter-box query names, as codes. A code typed
+  // exactly is that language alone, as it always was ('es' is not Esperanto
+  // too); anything else is every language with a name that starts with it, in
+  // English, in the language itself or in another catalog language ('fre',
+  // 'français', 'Französisch', 'צרפתית' → ['fr']). [] when it names none.
+  function translationLanguageCodesMatching(query) {
+    var folded = foldTranslationLanguageName(query);
+    if (!folded) return [];
+    var exact = TRANSLATION_LANGUAGE_CATALOG.filter(function (lang) { return lang.code === folded; })[0];
+    if (exact) return [exact.code];
+    var codes = [];
+    translationLanguageNameIndex().forEach(function (entry) {
+      if (entry.name.indexOf(folded) === 0 && codes.indexOf(entry.code) < 0) codes.push(entry.code);
+    });
+    return codes;
   }
 </script>

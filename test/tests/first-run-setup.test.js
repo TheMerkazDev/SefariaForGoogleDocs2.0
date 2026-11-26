@@ -31,6 +31,7 @@ function makeUserProperties(initial = {}) {
     getProperty: (k) => (Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null),
     setProperty(k, v) { store[k] = String(v); return this; },
     deleteProperty(k) { delete store[k]; return this; },
+    setProperties(values) { Object.keys(values).forEach(k => { store[k] = String(values[k]); }); return this; },
   };
 }
 
@@ -116,7 +117,7 @@ test('the same holds for a user whose settings are far from the defaults', () =>
   assert.deepEqual(plain(context.planFirstRunPreferences_(answers, prefs).changes), {});
 });
 
-test('"I\'ve used Torah Library before" sends nothing, so nothing changes', () => {
+test('"Keep my settings" sends nothing, so nothing changes', () => {
   const { context } = load();
   const plan = plain(context.planFirstRunPreferences_({}, seededDefaults()));
   assert.deepEqual(plan, { changes: {}, uiMode: null });
@@ -193,7 +194,7 @@ test('the Simple menu is Texts, Insert from Selection and two quick actions, the
     'Quick Actions: Transform Divine Names, Link Texts with Sefaria',
     '---',
     'Preferences',
-    'Help & Support',
+    'Help: How to..., Support, About, Re-run Setup Wizard',
   ]);
 });
 
@@ -251,7 +252,7 @@ test('setup is shown once while pending, then marked done', () => {
   const { context, calls, store } = load({ first_run_setup: 'pending' });
   assert.equal(context.maybeShowFirstRunSetup_(), true);
   assert.ok(calls.includes('migrate'), 'migrations run before the check');
-  assert.ok(calls.includes('dialog:Welcome to Torah Library'));
+  assert.ok(calls.includes('dialog:Welcome to Sefaria for Google Docs'));
   assert.equal(store.first_run_setup, 'done');
   assert.equal(context.maybeShowFirstRunSetup_(), false);
 });
@@ -297,6 +298,7 @@ function serverPreview(prefs, sample) {
   const userProperties = makeUserProperties(prefs);
   const context = { console, Logger: { log() {} } };
   vm.createContext(context);
+  vm.runInContext(read('server/source-text.gs'), context);
   vm.runInContext(TEXT_PROCESSING, context, { filename: 'text-processing.gs' });
   context.props = userProperties;
   context.sample = sample;
@@ -336,12 +338,152 @@ PREVIEW_CASES.forEach((answers, index) => {
   });
 });
 
+// The dialog's copy of markDivineNameSubstitute_ marks a substitute as the
+// server does, on names and substitutes the sample does not have.
+test('the preview marks a divine-name substitute exactly as the server does', () => {
+  const preview = loadPreview();
+  const server = { console };
+  vm.createContext(server);
+  vm.runInContext(read('server/source-text.gs'), server);
+  vm.runInContext(TEXT_PROCESSING, server, { filename: 'text-processing.gs' });
+  const names = ['יְהוָ֥ה', 'יְהֹוָה', 'יֱהֹוִה', 'יהו֥ה', 'יהוה', 'אֱלֹהִ֑ים', 'אֱלוֹהִים', 'יָ֑הּ', 'יָהּ'];
+  const substitutes = ['יי', "ה'", 'יקוק', 'השם', 'אלוקים', 'אלקים', 'אלודים', 'קה', 'יְיָ', 'יי֑', 'HaShem', '$&', ''];
+  for (const name of names) {
+    for (const substitute of substitutes) {
+      assert.equal(preview.setupMarkSubstitute_(name, substitute), server.markDivineNameSubstitute_(name, substitute), `${name} -> ${substitute}`);
+    }
+  }
+});
+
 test('the preview sample really shows the choices: the Name, vowels and "God" all change it', () => {
   const preview = loadPreview();
   const base = preview.setupPreviewText_({ vowels: 'always', teamim: true, divine: {} });
   const named = preview.setupPreviewText_({ vowels: 'always', teamim: true, divine: { meforash: { on: true, text: 'יי' }, god: { on: true, text: 'G-d' } } });
-  assert.ok(!base.he.includes('יי') && named.he.includes('יי'));
+  assert.ok(base.he.includes('יְהֹוָ֥ה') && !named.he.includes('יְהֹוָ֥ה') && named.he.includes('יְיָ֥'));
   assert.match(named.en, /our G-d,/);
   assert.notEqual(preview.setupPreviewText_({ vowels: 'never', teamim: true, divine: {} }).he, base.he);
   assert.notEqual(preview.setupPreviewText_({ vowels: 'always', teamim: false, divine: {} }).he, base.he);
+});
+
+
+// ── Screen 1: "I've used Sefaria for Google Docs", and "Keep my settings" ──
+// "I've used [the add-on] before — Keep my settings as they are" was on
+// screen 1 for everyone, though nobody installing has settings to keep
+// (version 1.0 stores none). It is now "Keep my settings", shown only to
+// someone with settings of their own, and screen 1 has an answer for
+// version 1.0 users instead.
+
+const SETUP_HTML = read('first-run-setup.html');
+
+function settingsContext() {
+  const context = { console };
+  vm.createContext(context);
+  [MENU_LAYOUT, PREFERENCES, FIRST_RUN].forEach((src) => vm.runInContext(src, context));
+  return {
+    has: (stored) => context.firstRunHasSavedSettings_(stored, vm.runInContext('getDefaultPreferences()', context), vm.runInContext('SETTINGS', context)),
+  };
+}
+
+test('at install nobody is offered "Keep my settings": the seeded defaults are not settings of one\'s own', () => {
+  const { has } = settingsContext();
+  assert.equal(has(Object.assign(seededDefaults(), { first_run_setup: 'pending' })), false);
+  assert.equal(has({ first_run_setup: 'pending' }), false, 'nothing stored at all');
+  // What the sidebar records by itself is not a choice.
+  assert.equal(has(Object.assign(seededDefaults(), { first_run_setup: 'pending', search_mode: 'voices', last_search_sort_mode: 'chronological' })), false);
+});
+
+test('"Keep my settings" is offered after setup ran before, or to anyone with a setting of their own', () => {
+  const { has } = settingsContext();
+  assert.equal(has(Object.assign(seededDefaults(), { first_run_setup: 'done' })), true, 'Help → Run setup again');
+  // A future upgrade that shows setup again (first_run_setup back to "pending").
+  assert.equal(has(Object.assign(seededDefaults(), { first_run_setup: 'pending', nekudot_filter: 'tanakh' })), true);
+});
+
+test('the setup page is told whether to offer it, and setup still opens if that can\'t be worked out', () => {
+  const extra = {};
+  const { context, calls } = load({ first_run_setup: 'pending' }, {
+    getUiAppConfig_: (pageId, mode, extraFields) => { extra.fields = extraFields; return Object.assign({ pageId, mode }, extraFields); },
+  });
+  // This harness has no preferences.gs: the comparison fails, and only a
+  // finished setup would count.
+  assert.equal(context.maybeShowFirstRunSetup_(), true);
+  assert.ok(calls.includes('dialog:Welcome to Sefaria for Google Docs'));
+  assert.equal(extra.fields.hasSavedSettings, false);
+  context.openFirstRunSetup();
+  assert.equal(extra.fields.hasSavedSettings, true, 'marked done once shown');
+  assert.equal(extra.fields.rerun, true);
+});
+
+test('screen 1: "I\'ve used Sefaria for Google Docs" for everyone, "Keep my settings" hidden unless offered', () => {
+  const purposes = [...SETUP_HTML.matchAll(/name="purpose" value="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(purposes, ['quoting', 'sheets', 'academic', 'sefaria', 'returning']);
+  assert.match(SETUP_HTML, /value="sefaria">\s*<span class="setup-card-title">I've used Sefaria for Google Docs 1.0</);
+  assert.match(SETUP_HTML, /<label class="setup-card" id="setup-purpose-keep" hidden>\s*<input type="radio" name="purpose" value="returning">/);
+  assert.ok(!/used Sefaria for Google Docs before|Keep my settings as they are/.test(SETUP_HTML));
+  assert.match(SETUP_JS, /\$one\('#setup-purpose-keep'\)\.hidden = config\.hasSavedSettings !== true;/);
+});
+
+test('"I\'ve used Sefaria for Google Docs" presets version 1.0\'s look and explains God\'s name', () => {
+  const fn = SETUP_JS.match(/function applyPurpose\(value\) \{[\s\S]*?\n  \}/)[0];
+  assert.match(fn, /value === 'sefaria' && !touched\.arrangement\) setRadio\('arrangement', 'he-right'\)/);
+  assert.match(fn, /value === 'sefaria' && !touched\.show\) setRadio\('show', 'both'\)/);
+  assert.match(fn, /setRadio\('uiMode', value === 'academic' \? 'full' : 'simple'\)/);
+  assert.match(fn, /#setup-divine-sefaria-note'\)\.hidden = value !== 'sefaria'/);
+  assert.match(SETUP_HTML, /id="setup-divine-sefaria-note" hidden>/);
+  // Only the answers reach the server: the purpose is never stored.
+  assert.doesNotMatch(SETUP_JS.match(/function collectAnswers\(\) \{[\s\S]*?\n  \}/)[0], /purpose/);
+});
+
+
+test('wizard exposes and stores optional search tools', () => {
+  const { context } = load();
+  const plan = plain(context.planFirstRunPreferences_({ voices: false, lexicon: false }, seededDefaults()));
+  assert.deepEqual(plan.changes, { show_voices_tab: 'false', show_lexicon_tab: 'false' });
+  assert.match(SETUP_HTML, /id="setup-voices"/);
+  assert.match(SETUP_HTML, /id="setup-lexicon"/);
+  assert.match(SETUP_JS, /save\(\{ legacyPreset: true \}, true\)/);
+});
+test('legacy preset resets active choices, keeps profiles and consent, and skips custom screens', () => {
+  const context = { console, Logger: { log() {} } };
+  const props = makeUserProperties({ settings_profiles: 'saved index', settings_profile_p2: 'saved snapshot', linker_upload_acknowledged: 'true', ui_mode: 'full' });
+  context.PropertiesService = { getUserProperties: () => props };
+  context.buildAndInstallMenu = () => {};
+  vm.createContext(context);
+  [MENU_LAYOUT, PREFERENCES, FIRST_RUN].forEach(src => vm.runInContext(src, context));
+  context.completeFirstRunSetup(JSON.stringify({ legacyPreset: true }));
+  assert.equal(props.store.ui_mode, 'simple');
+  assert.equal(props.store.show_voices_tab, 'false');
+  assert.equal(props.store.show_lexicon_tab, 'false');
+  assert.equal(props.store.apply_sheimot_on_insertion, 'false');
+  assert.equal(props.store.linker_review_mode, 'quiet');
+  assert.equal(props.store.settings_profiles, 'saved index');
+  assert.equal(props.store.settings_profile_p2, 'saved snapshot');
+  assert.equal(props.store.linker_upload_acknowledged, 'true');
+  const result = plain(context.restartFirstRunSetup('keep'));
+  assert.equal(result.answers.voices, false);
+  context.restartFirstRunSetup('reset');
+  assert.equal(props.store.ui_mode, 'full');
+  assert.equal(props.store.show_voices_tab, 'true');
+  assert.equal(props.store.settings_profiles, 'saved index');
+});
+
+
+test('a Simple/Everything round trip preserves explicit search-tool switches and the actual Texts-only menu', () => {
+  const initial = Object.assign(seededDefaults(), { ui_mode: 'full', show_voices_tab: 'false',
+    show_lexicon_tab: 'false', nekudot: 'false', source_notes_mode: 'separate' });
+  const { context, store } = load(initial);
+  const check = () => {
+    const plan = plain(context.planMenuFromLayout_(store.menu_layout, {
+      voicesEnabled: store.show_voices_tab !== 'false', lexiconEnabled: store.show_lexicon_tab !== 'false'
+    }));
+    const labels = JSON.stringify(plan);
+    assert.ok(labels.includes('Add Sources with Sefaria'));
+    assert.ok(!labels.includes('"Voices"') && !labels.includes('"Lexicon"'));
+    for (const key of ['show_voices_tab', 'show_lexicon_tab', 'nekudot', 'source_notes_mode']) {
+      assert.equal(store[key], initial[key], key + ' was not reset');
+    }
+  };
+  check();
+  context.setUiMode('simple'); check();
+  context.setUiMode('full'); check();
 });

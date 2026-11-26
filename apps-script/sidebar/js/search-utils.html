@@ -49,7 +49,10 @@ var BUSY_OVERLAY_LABELS = {
   fetch: 'Fetching the sheet…',
   selection: 'Looking up your selection…',
   transform: 'Updating divine names…',
-  preferences: 'Opening Preferences…'
+  preferences: 'Opening Preferences…',
+  profile: 'Switching profile…',
+  'session-save': 'Saving your defaults…',
+  'session-reset': 'Reverting to your defaults…'
 };
 
 function showBusyOverlay(kind) {
@@ -65,9 +68,18 @@ function hideBusyOverlay() {
 }
 
 function showInsertWarning(message) {
-  var warningText = String(message || 'Could not insert at the current selection. Place the cursor where you want the source inserted, then try again.').trim();
-  $('.insert-warning').remove();
-  $('.suggestions').prepend("<div class='insert-warning' role='alert' aria-live='assertive'>" + escapeHTML(warningText) + "</div>");
+  $('#sidebar-insert-warning').prop('hidden', false).text(message);
+}
+
+function clearInsertWarning() {
+  $('#sidebar-insert-warning').prop('hidden', true).text('');
+}
+
+function showInsertFailure(error) {
+  hideBusyOverlay();
+  var message = String((error && error.message) || '').trim();
+  showInsertWarning(message ? 'Could not insert the source. ' + message :
+    'Could not confirm the insertion. Check the document and your connection before trying again.');
 }
 
 function buildSefariaOpenUrl() {
@@ -81,7 +93,8 @@ function buildSefariaOpenUrl() {
   else if (outputMode === 'en') params.set('lang', 'en');
   else params.set('lang', 'bi');
 
-  var selectedTranslationVersion = $('.translation-version-select').val() || data.versionTitle || '';
+  // The first translation picked (a multi-selection's .val() is an array).
+  var selectedTranslationVersion = (typeof orderedTranslationVersions !== 'undefined' && orderedTranslationVersions[0]) || data.versionTitle || '';
   var selectedSourceVersion = $('.he-version-selection').val() || data.heVersionTitle || '';
   if (outputMode !== 'he' && selectedTranslationVersion) params.set('ven', selectedTranslationVersion);
   if (outputMode !== 'en' && selectedSourceVersion) params.set('vhe', selectedSourceVersion);
@@ -412,11 +425,15 @@ function clearVersionSelectors() {
   activeTranslationOptions = null;
   $('.translation-version-control').empty();
   $('.hebrew-version-control').empty();
+  $('.version-summary-count').removeAttr('data-option-count').empty();
 }
 
 function setResultsHint(message, allowHtml) {
   var text = String(message || '').trim();
   var $hint = $('.results-hint');
+  // Kept with the shown tab's search, so it is there again when the tab is
+  // (sidebar/js/search-tabs).
+  if (typeof noteShownSearchRunHint === 'function') noteShownSearchRunHint(message, allowHtml);
   if (!text) {
     $hint.hide().empty();
     return;
@@ -956,8 +973,14 @@ function describeResultLanguages(item) {
   return unique.map(function (lang) { return labelMap[lang] || lang.toUpperCase(); }).join(', ');
 }
 
+// A Voices topic category borrows its corpus colour (VOICES_TOPIC_CATALOG).
 function getCorpusAccentClass(corpusKey) {
-  return corpusColorClassMap[String(corpusKey || '').toLowerCase()] || 'corpus-accent-default';
+  var key = String(corpusKey || '').toLowerCase();
+  if (key.indexOf('topic-') === 0 && typeof VOICES_TOPIC_CATALOG !== 'undefined') {
+    var topic = VOICES_TOPIC_CATALOG.filter(function (entry) { return entry.key === key; })[0];
+    key = topic && topic.accent ? topic.accent : '';
+  }
+  return corpusColorClassMap[key] || 'corpus-accent-default';
 }
 
 

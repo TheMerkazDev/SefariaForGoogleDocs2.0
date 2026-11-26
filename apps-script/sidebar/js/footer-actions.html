@@ -8,7 +8,8 @@ function setInsertButtonState(enabled) {
 function setFooterButtonStates() {
   var canInsert = !!((appMode === 'voices' && selectedVoiceItem && selectedVoiceItem.ref) ||
                      (appMode === 'texts' && hasResolvedReference && data && data.ref) ||
-                     (appMode === 'lexicon' && selectedLexiconItem && selectedLexiconItem.headWord));
+                     (appMode === 'lexicon' && selectedLexiconItem && selectedLexiconItem.headWord &&
+                      selectedLexiconEntries().length > 0));
   var canOpen = !!((appMode === 'voices' && selectedVoiceItem && selectedVoiceItem.url) ||
                    (appMode === 'texts' && hasResolvedReference && data && data.ref));
   var hasHistoryItems = !!(((sessionLibrary && sessionLibrary.pinned) || []).length || ((sessionLibrary && sessionLibrary.inserted) || []).length);
@@ -22,28 +23,21 @@ function setFooterButtonStates() {
 
 
 $('#insert-source').click(function () {
-  // --- Lexicon mode: insert a lexicon entry ---
+  // --- Lexicon mode: insert the picked entries of the selected word ---
   if (appMode === 'lexicon') {
-    if (!selectedLexiconItem || !selectedLexiconItem.headWord) return;
-
-    // Read from the new radio chip group (falls back to 'entry')
-    var lexiconInsertMode = (typeof getLexiconFormat === 'function')
-      ? getLexiconFormat()
-      : ($('.lexicon-format-btn[aria-checked="true"]').data('value') || 'entry');
-
-    var lexiconPayload = Object.assign({}, selectedLexiconItem, { insertMode: lexiconInsertMode });
+    var lexiconPayload = buildLexiconInsertPayload();
+    if (!lexiconPayload.headWord || !lexiconPayload.entries.length) return;
     var $btn = $('#insert-source');
+    var insertedWord = selectedLexiconItem;
 
+    clearInsertWarning();
     showBusyOverlay('insert');
     google.script.run
       .withSuccessHandler(function () {
         hideBusyOverlay();
-        $('.insert-warning').remove();
-        upsertSessionEntry('inserted', buildSessionEntry(
-          selectedLexiconItem.ref,
-          selectedLexiconItem.headWord || selectedLexiconItem.label,
-          'Dictionary'
-        ));
+        // Reopening it from the Session Library looks the word up again.
+        if (insertedWord) upsertSessionEntry('inserted', lexiconSessionEntry(insertedWord, lexiconPayload.entries));
+        if (insertedWord !== selectedLexiconItem) return;
         // Brief success feedback on the button
         var originalLabel = $btn.text();
         $btn.text('Inserted ✓').addClass('lexicon-insert-success');
@@ -51,10 +45,7 @@ $('#insert-source').click(function () {
           $btn.text(originalLabel).removeClass('lexicon-insert-success');
         }, 1800);
       })
-      .withFailureHandler(function (error) {
-        hideBusyOverlay();
-        showInsertWarning(error && error.message);
-      })
+      .withFailureHandler(showInsertFailure)
       .insertLexiconEntry(lexiconPayload);
     return;
   }
@@ -64,7 +55,7 @@ $('#insert-source').click(function () {
     if (!selectedVoiceItem || !selectedVoiceItem.ref) return;
 
     var insertMode = $('#voices-insert-mode .icon-mode-card[aria-checked="true"]').data('value') || 'reference';
-    var transliterationScheme = $('#voices-translit-menu .cc-translit-option.is-selected').attr('data-value') || 'none';
+    var transliterationScheme = selectedVoicesTransliteration();
     var fetchesSheet = insertMode === 'contents' || insertMode === 'both';
 
     // Build a payload from the selected sheet item, forwarding all hook fields.
@@ -85,23 +76,20 @@ $('#insert-source').click(function () {
       debugUnknownNodes:   !!selectedVoiceItem.debugUnknownNodes
     };
 
+    var insertedSheet = selectedVoiceItem;
+    var insertedFrom = shownSearchRun();
     if (fetchesSheet) { $('.voices-fetch-loading').show(); }
+    clearInsertWarning();
     showBusyOverlay(fetchesSheet ? 'fetch' : 'insert');
     google.script.run
       .withSuccessHandler(function () {
         $('.voices-fetch-loading').hide();
         hideBusyOverlay();
-        $('.insert-warning').remove();
-        upsertSessionEntry('inserted', buildSessionEntry(
-          selectedVoiceItem.ref,
-          selectedVoiceItem.label || selectedVoiceItem.ref,
-          'voices'
-        ));
+        upsertSessionEntry('inserted', voicesSessionEntry(insertedSheet, insertedFrom));
       })
       .withFailureHandler(function (error) {
         $('.voices-fetch-loading').hide();
-        hideBusyOverlay();
-        showInsertWarning(error && error.message);
+        showInsertFailure(error);
       })
       .insertSheet(sheetPayload, { insertMode: insertMode, transliterationScheme: transliterationScheme !== 'none' ? transliterationScheme : null });
     return;
@@ -113,17 +101,22 @@ $('#insert-source').click(function () {
   var outputMode = $('.output-mode-selection').val();
   var language = (outputMode === 'both') ? undefined : outputMode;
   var bilingualLayout = $('.bilingual-layout-selection').val();
+  // The reader's Line numbers choice, as Preferences or the card left it. A
+  // preview never changes it: the server already leaves the markers out of a
+  // text with no lines to number (formatDataForPesukim), and forcing it on
+  // for each verse range ignored "off". See docs/regression-log.md.
   var showPesukim = Boolean($('.wants-pesukim').prop('checked'));
   var includeTranslationSourceInfo = $('.include-translation-source-info').is(':checked');
   var insertSefariaLink = $('.insert-sefaria-link').is(':checked');
   var insertHebrewSefariaLink = $('.insert-hebrew-sefaria-link').is(':checked');
   var sourceEmphasisMode = ccNormalizeEmphasisMode($('.source-emphasis-mode').val());
+  var sourceNotesMode = ccNormalizeNotesMode($('.source-notes-mode').val());
   // No preferredTitle: the title is the chosen text's ref. The search box
   // holds the query ("shema", "light"), not the name of the text picked.
 
   // Multi-version insertion: only available in translation-only (en) or Hebrew-on-top (he-top) modes.
   var allowMulti = outputMode === 'en' || (outputMode === 'both' && bilingualLayout === 'he-top');
-  var $translationSelect = $('.translation-version-select').not('.he-version-selection');
+  var $translationSelect = translationVersionSelect();
   // Prefer selection-order tracking; fall back to DOM order from $select.val().
   var selectedVersions = $translationSelect.prop('multiple')
     ? (typeof orderedTranslationVersions !== 'undefined' && orderedTranslationVersions.length > 0
@@ -133,46 +126,57 @@ $('#insert-source').click(function () {
   var isMultiInsert = allowMulti && Array.isArray(selectedVersions) && selectedVersions.length > 1;
 
   if (isMultiInsert) {
+    clearInsertWarning();
     showBusyOverlay('insert');
     google.script.run.withSuccessHandler(function (result) {
       hideBusyOverlay();
-      $('.insert-warning').remove();
       upsertSessionEntry('inserted', buildSessionEntry(data.ref, selectedResultSummary && selectedResultSummary.label ? selectedResultSummary.label : data.ref, getCurrentCorpusForRef(data.ref)));
       showInsertNotice(result);
       var skipped = (result && Array.isArray(result.skipped)) ? result.skipped : [];
+      var filtered = (result && Array.isArray(result.filtered)) ? result.filtered : [];
+      var warnings = [];
       if (skipped.length) {
         markTranslationsUnavailable(data.ref, skipped);
-        showInsertWarning('Skipped ' + skipped.length + ' translation' + (skipped.length === 1 ? '' : 's') +
+        warnings.push('Skipped ' + skipped.length + ' translation' + (skipped.length === 1 ? '' : 's') +
           ' with no text for this reference: ' + skipped.join(', '));
       }
-    }).withFailureHandler(function (error) {
-      hideBusyOverlay();
-      showInsertWarning(error && error.message);
-    }).insertReferenceVersions(data.ref, {
+      if (filtered.length) {
+        // These editions have text; the current policy removed it. Keep them
+        // selectable so changing Commentary or Notes can restore their words.
+        warnings.push('Omitted ' + filtered.length + ' translation' + (filtered.length === 1 ? '' : 's') +
+          ' because no text remained with these Commentary and Notes choices: ' + filtered.join(', ') +
+          '. Change those options to include them.');
+      }
+      if (warnings.length) showInsertWarning(warnings.join(' '));
+    }).withFailureHandler(showInsertFailure).insertReferenceVersions(data.ref, {
       versionTitles: selectedVersions,
-      heVersionTitle: $('.he-version-selection').val() || '',
+      // The edition loaded, even while the filter box hides its option.
+      heVersionTitle: $('.he-version-selection').val() || data.heVersionTitle || '',
       singleLanguage: language,
       bilingualLayout: bilingualLayout,
+      // Stacked "Line by line": each Hebrew line, then that line of each translation.
+      alignedRows: $('.wants-aligned-rows').is(':checked'),
+      // Stacked: under the Hebrew (each Hebrew line, with Line by line).
+      includeTransliteration: $('.include-transliteration').is(':checked'),
+      transliterationScheme: getSidebarTransliterationScheme(),
       pasukPreference: showPesukim,
       includeTranslationSourceInfo: includeTranslationSourceInfo,
       insertSefariaLink: insertSefariaLink,
       insertHebrewSefariaLink: insertHebrewSefariaLink,
       sourceEmphasisMode: sourceEmphasisMode,
+      sourceNotesMode: sourceNotesMode,
       sessionId: sidebarSessionId
     });
     return;
   }
 
+  clearInsertWarning();
   showBusyOverlay('insert');
   google.script.run.withSuccessHandler(function (result) {
     hideBusyOverlay();
-    $('.insert-warning').remove();
     upsertSessionEntry('inserted', buildSessionEntry(data.ref, selectedResultSummary && selectedResultSummary.label ? selectedResultSummary.label : data.ref, getCurrentCorpusForRef(data.ref)));
     showInsertNotice(result);
-    }).withFailureHandler(function (error) {
-    hideBusyOverlay();
-    showInsertWarning(error && error.message);
-  }).insertReference(data, {
+  }).withFailureHandler(showInsertFailure).insertReference(data, {
     singleLanguage: language,
     pasukPreference: showPesukim,
     includeTranslationSourceInfo: includeTranslationSourceInfo,
@@ -183,8 +187,11 @@ $('#insert-source').click(function () {
     includeTransliteration: $('.include-transliteration').is(':checked'),
     // The scheme picked in the Layout tray may be a session override only.
     transliterationScheme: getSidebarTransliterationScheme(),
+    // So may the transliteration's Position (side by side: below, left, right).
+    transliterationPosition: ccNormalizeTranslitPosition(effectivePreferences.transliteration_position),
     insertCitationOnly: false,
     sourceEmphasisMode: sourceEmphasisMode,
+    sourceNotesMode: sourceNotesMode,
     // The Layout tray's fonts may be session overrides only.
     sessionId: sidebarSessionId
   });
@@ -214,34 +221,52 @@ $(document).on('click', function (event) {
 
 $('.insert-from-selection-tool').on('click', function () {
   $('#footer-actions-panel').hide();
+  clearInsertWarning();
   showBusyOverlay('selection');
   google.script.run.withSuccessHandler(function () {
     hideBusyOverlay();
-  }).withFailureHandler(function (error) {
-    hideBusyOverlay();
-    if (typeof showSidebarToast === 'function') showSidebarToast((error && error.message) || 'Insert from Selection failed.');
-  }).insertSourceFromSelection();
+  }).withFailureHandler(showInsertFailure).insertSourceFromSelection();
 });
 
 $('.open-divine-names-tool').on('click', function () {
   showBusyOverlay('transform');
   google.script.run.withSuccessHandler(function () {
     hideBusyOverlay();
-  }).withFailureHandler(function () {
+  }).withFailureHandler(function (error) {
     hideBusyOverlay();
+    showSidebarToast((error && error.message) || 'Transform Divine Names could not run. Nothing was changed.', 8000);
   }).transformDivineNames();
 });
 
+// These open a dialog. They used to give no sign of failing: Link Texts from
+// the sidebar did nothing, twice, until the menu was used instead (BUG-007).
+var linkerOpening = false;
 $('.open-linker-tool').on('click', function () {
-  google.script.run.linkerHTML();
+  if (linkerOpening) return;
+  linkerOpening = true;
+  $('.open-linker-tool').prop('disabled', true).attr('aria-busy', 'true');
+  function linkerOpened() {
+    linkerOpening = false;
+    $('.open-linker-tool').prop('disabled', false).removeAttr('aria-busy');
+  }
+  google.script.run.withSuccessHandler(linkerOpened).withFailureHandler(function (error) {
+    linkerOpened();
+    showSidebarToast('Link Texts could not be opened' +
+      ((error && error.message) ? ': ' + error.message : '.') +
+      ' Try again, or use Link Texts in the add-on\u2019s Extensions menu.', 8000);
+  }).linkerHTML();
 });
 
 $('#open-help-modal').on('click', function () {
-  google.script.run.openHelpModal();
+  google.script.run.withFailureHandler(function () {
+    showSidebarToast('Help could not be opened. Try again.');
+  }).openHelpModal();
 });
 
 $('#open-feedback-modal').on('click', function () {
-  google.script.run.openFeedbackModal();
+  google.script.run.withFailureHandler(function () {
+    showSidebarToast('The feedback form could not be opened. Try again.');
+  }).openFeedbackModal();
 });
 
 </script>

@@ -32,7 +32,7 @@
     min-height: 0;
     overflow-x: visible;
     overflow-y: auto;
-    padding: 16px 18px 118px;
+    padding: 16px 18px 20px;
     scroll-padding-top: 64px;
     padding-left: 14px;
     padding-right: 14px;
@@ -40,53 +40,36 @@
   }
 
   .save-bar {
-    position: sticky;
-    bottom: 0;
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    justify-content: flex-start;
-    gap: 12px;
-    padding: 14px 18px;
+    justify-content: space-between;
+    gap: 6px 12px;
+    padding: 8px 14px;
     background: #fff;
-    border-top: 1px solid #e3dfd8;
-    box-shadow: 0 -2px 8px rgba(31, 59, 104, 0.04);
-	grid-template-columns: 1fr;
-    align-items: start;
+    border-top: 1px solid var(--border);
+  }
+
+  #results {
+    flex: 1 1 180px;
+    font-size: 12px;
   }
 
   .save-actions {
-      width: 100%;
-      order: 1;
-	  display: grid;
-	  grid-template-columns: repeat(2, minmax(0, 1fr));
-	  align-items: stretch;
-	  gap: 10px;
-	  order: 2;
-	}
-
-.save-actions > button {
-  box-sizing: border-box;
-  width: 100%;
-  min-height: 36px;
-  margin: 0;
-  padding: 0 12px;
-  line-height: 1.2;
-  font: inherit;
-  appearance: none;
-}
-
-  .save-feedback {
     display: flex;
-    flex-direction: column;
-    gap: 4px;
-    min-width: 0;
-    order: 2;  
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    max-width: 100%;
+    gap: 6px;
+    margin-left: auto;
   }
 
-  .save-note {
-    color: #666;
-    font-size: 13px;
-    line-height: 1.35;
+  .save-actions > button,
+  .pref-profile-defaults button {
+    min-height: 30px;
+    padding: 4px 10px;
+    font-size: 12px;
+    white-space: nowrap;
   }
 
   .hide {
@@ -355,21 +338,6 @@
   .segmented-option.is-active {
     background: #1f3b68;
     color: #fff;
-  }
-
-  /* Source Emphasis: the same B&I glyphs as the sidebar's Layout tray button. */
-  .emphasis-mode-control .segmented-option {
-    gap: 6px;
-    font-size: 13px;
-  }
-
-  .emphasis-mode-glyph {
-    font-size: 12px;
-    white-space: nowrap;
-  }
-
-  .emphasis-mode-glyph--discard {
-    opacity: 0.6;
   }
 
   .style-control {
@@ -1158,10 +1126,6 @@
     word-break: normal;
   }
 
-  .save-actions .submit {
-    min-height: 36px;
-  }
-
   @media (max-width: 440px) {
     .compact-row,
     .compact-inline-pair,
@@ -1178,39 +1142,243 @@
   /* top is minus the shell's padding-top: sticky offsets are measured from
      the scroll container's padding edge, so top: 0 left a 16px strip above
      the bar where scrolled content showed through.                        */
-  /* Interface mode (Simple / Everything) and, in Simple mode, the switch
-     that shows the advanced tabs and sections hidden below. */
-  .interface-mode-row,
-  .show-advanced-row {
+  /* Interface mode (Simple / Everything): the one switch for what is shown.
+     Simple hides the advanced tabs and sections below; .show-advanced is
+     set only by a link straight to one of those tabs (preferences/js.html). */
+  /* The Interface and Sidebar tabs rows share their columns, so the label
+     and the choices line up across the two. */
+  .interface-mode-controls {
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
-    gap: 4px 14px;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
     margin-top: 10px;
+  }
+  .pref-icon-button {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: 1px solid #d7d3cb;
+    border-radius: 7px;
+    background: #fff;
+    color: #1f3b68;
+    font: inherit;
+    font-size: 19px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .pref-icon-button:hover { background: #f1ece3; }
+  .pref-icon-button:focus-visible { outline: 2px solid #1f3b68; outline-offset: 2px; }
+  .pref-icon-button:disabled { opacity: .5; cursor: default; }
+  .pref-icon-button--small { width: 27px; height: 27px; font-size: 15px; }
+  .pref-profile-rail-header { display: flex; align-items: center; gap: 4px; padding-right: 4px; }
+  .interface-mode-row {
+    display: grid;
+    grid-template-columns: 7.5em 7em max-content;
+    align-items: center;
+    column-gap: 10px;
+    margin-top: 0;
     font-size: 13px;
   }
-  .interface-mode-row label,
-  .show-advanced-row {
+  .interface-mode-row + .interface-mode-row { margin-top: 6px; }
+  .interface-mode-row label {
     display: inline-flex;
     align-items: center;
     gap: 4px;
   }
   .interface-mode-label { font-weight: 600; }
-  .interface-mode-status { color: var(--muted); font-size: 12px; }
-  .preferences-dialog:not([data-ui-mode="simple"]) .show-advanced-row { display: none; }
+  .interface-mode-note { margin: 4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
+  .interface-mode-status { margin: 4px 0 0; color: var(--muted); font-size: 12px; font-weight: 600; }
+  .interface-mode-status:empty { display: none; }
+
+  /* A sidebar tab switched off (Sidebar tabs, above) takes its Insertion
+     Defaults sub-tab with it; with Texts alone the sub-tab bar goes too.
+     preferences/js.html keeps data-sidebar-tabs in step with the switches
+     and moves off a sub-tab that is hidden. */
+  .preferences-dialog:not([data-sidebar-tabs~="voices"]) .pref-workflow-tab[data-workflow="voices"],
+  .preferences-dialog:not([data-sidebar-tabs~="lexicon"]) .pref-workflow-tab[data-workflow="lexicon"],
+  .preferences-dialog[data-sidebar-tabs="texts"] .pref-workflow-tabs {
+    display: none !important;
+  }
 
   .preferences-dialog[data-ui-mode="simple"]:not(.show-advanced) #pref-tab-search-btn,
   .preferences-dialog[data-ui-mode="simple"]:not(.show-advanced) #pref-tab-linking-btn,
   .preferences-dialog[data-ui-mode="simple"]:not(.show-advanced) #pref-tab-experimental-btn,
   .preferences-dialog[data-ui-mode="simple"]:not(.show-advanced) #translation-language-typography,
-  .preferences-dialog[data-ui-mode="simple"]:not(.show-advanced) #emphasis-mapping {
+  .preferences-dialog[data-ui-mode="simple"]:not(.show-advanced) #emphasis-mapping,
+  .preferences-dialog[data-ui-mode="simple"]:not(.show-advanced) #sidebar-insertion-options {
     display: none !important;
   }
 
+  .preferences-dialog[data-ui-mode="full"] { max-width: 860px; }
+  .pref-main { min-width: 0; }
+
+  .pref-profile-workspace {
+    display: grid;
+    grid-template-columns: clamp(120px, 22%, 170px) minmax(0, 1fr);
+    gap: 16px;
+  }
+
+  .pref-profile-defaults {
+    min-width: 0;
+    margin-top: 8px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #fff;
+  }
+
+  .pref-profile-defaults-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .pref-profile-tools { display: flex; flex: 0 0 auto; gap: 4px; }
+  .pref-profile-tools .pref-icon-button { padding: 0; min-height: 27px; }
+  .pref-reset-options [data-preset="document"] { width: auto; min-width: 64px; font-size: 15px; }
+  .preferences-dialog .submit.danger {
+    background: #7f1d1d;
+    border-color: #7f1d1d;
+    color: #fff;
+  }
+  .preferences-dialog .submit.danger:hover { background: #641616; }
+  .save-actions > .apply-sidebar-preferences-button,
+  .save-actions > .save-preferences-button,
+  .pref-reset-options [data-preset="factory"] { font-size: 18px; line-height: 1; }
+  .pref-profile-defaults [hidden] { display: none; }
+  .pref-profile-defaults h2 { min-width: 0; margin: 0; font-size: 14px; overflow-wrap: anywhere; }
+  .pref-profile-defaults p { margin: 6px 0 10px; font-size: 12px; }
+  .pref-reset-options { margin-top: 12px; font-size: 12px; }
+  .pref-reset-options summary { margin-bottom: 6px; cursor: pointer; }
+
+  .pref-profile-rail {
+    position: sticky;
+    top: 0;
+    align-self: start;
+    max-height: calc(100vh - 100px);
+    overflow-y: auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px 0 0;
+    font-size: 13px;
+  }
+  @media (max-width: 420px) {
+    .pref-profile-workspace { grid-template-columns: 1fr; }
+    .pref-profile-rail { position: static; max-height: none; }
+  }
+
+  .pref-profile-rail-title {
+    flex: 1;
+    padding: 0 0 2px 4px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #6b6b6b;
+  }
+  .pref-profile-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+  .pref-profile-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 10px;
+    font: inherit;
+    font-weight: 600;
+    text-align: left;
+    color: #445267;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .pref-profile-item:hover { background: #f1ece3; color: #1f3b68; }
+  .pref-profile-item:focus-visible { outline: 2px solid #1f3b68; outline-offset: 1px; }
+  .pref-profile-item[aria-current="true"] {
+    color: #1f3b68;
+    background: #fff;
+    border-color: #e3dfd8;
+    box-shadow: 0 1px 2px rgba(31, 59, 104, 0.08);
+  }
+  .pref-profile-item-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pref-profile-item-dot {
+    flex: 0 0 auto;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    border: 1.5px solid #b9b2a6;
+  }
+  .pref-profile-item[aria-current="true"] .pref-profile-item-dot { background: #1f3b68; border-color: #1f3b68; }
+  .pref-profile-new {
+    padding: 0;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    color: #1f3b68;
+    background: none;
+    border: 0;
+    cursor: pointer;
+  }
+  .pref-profile-new:hover { text-decoration: underline; }
+  .pref-profile-new { align-self: flex-start; margin: 4px 10px 0; }
+  .pref-profile-new[hidden] { display: none; }
+  .pref-profile-name-field { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin: 14px 0; }
+  .pref-profile-name-field[hidden] { display: none; }
+  .pref-profile-name-label { font-size: 12px; font-weight: 600; color: #445267; }
+  .pref-profile-name-field input { width: min(100%, 280px); box-sizing: border-box; }
+  .pref-profile-name-actions { display: flex; gap: 6px; }
+  .pref-profile-name-actions .submit { flex: 1 1 0; min-width: 0; padding: 4px 6px; font-size: 12px; }
+  .pref-profile-hint { margin: 6px 10px 0; color: #6b6b6b; font-size: 11.5px; line-height: 1.4; }
+
+  /* ── Sidebar tab: the Insertion Options controls, a grid of switches per
+     section of the sidebar's card. ── */
+  .pref-tab-intro { margin: 0 2px 12px; }
+  .sidebar-option-groups { display: flex; flex-direction: column; gap: 12px; }
+  .sidebar-option-group-title {
+    margin: 0 0 6px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #6b6b6b;
+  }
+  .sidebar-option-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+  }
+  .sidebar-option-chip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    padding: 6px 8px;
+    font-size: 12.5px;
+    color: #445267;
+    background: #fff;
+    border: 1px solid #e3dfd8;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .sidebar-option-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sidebar-option-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .sidebar-option-footer .mini-help { margin: 0; }
+  .sidebar-option-footer .small-button { flex: 0 0 auto; }
+  .sidebar-option-chip:has(input:not(:checked)) { color: #8a8a8a; background: #f6f4f0; border-style: dashed; }
+
+  /* Pinned while the panel scrolls, so it must paint over the content that
+     scrolls under it: an open section is its own stacking layer at 30
+     (.section-accordion[open], details.compact-accordion[open]: its menus
+     reach over the cards below), and at 25 the bar went under it. Above
+     those, below an open custom select (50) and the overlays and dialogs
+     (300 and up). Pinned by test/ui/preferences-layers.test.js. */
   .pref-tab-bar {
     position: sticky;
     top: -16px;
-    z-index: 25;
+    z-index: 40;
     display: flex;
     gap: 4px;
     margin: 0 0 18px;
@@ -1276,11 +1444,10 @@
 
   /* ── Insertion Defaults: workflow sub-tabs ──────────────────────────── */
 
-  /* Segmented tabs: the Texts / Voices / Lexicon defaults, and Fonts →
-     Title's translation / source title. One light track, the chosen tab
-     raised on it, as the shared Layout pickers (shared/insertion-options). */
-  .pref-workflow-tabs,
-  .title-language-tabs {
+  /* Segmented tabs: the Texts / Voices / Lexicon defaults. One light track,
+     the chosen tab raised on it, as the shared Layout pickers
+     (shared/insertion-options). */
+  .pref-workflow-tabs {
     display: flex;
     gap: 2px;
     margin: 0 0 14px;
@@ -1289,8 +1456,7 @@
     border-radius: 9px;
   }
 
-  .pref-workflow-tab,
-  .title-language-tab {
+  .pref-workflow-tab {
     flex: 1;
     min-width: 0;
     min-height: 30px;
@@ -1305,27 +1471,93 @@
     font-weight: 600;
   }
 
-  .pref-workflow-tab:hover:not(.is-active):not([aria-selected="true"]),
-  .title-language-tab:hover:not([aria-selected="true"]) {
+  .pref-workflow-tab:hover:not(.is-active):not([aria-selected="true"]) {
     color: var(--sefaria-blue);
   }
 
   .pref-workflow-tab.is-active,
-  .pref-workflow-tab[aria-selected="true"],
-  .title-language-tab[aria-selected="true"] {
+  .pref-workflow-tab[aria-selected="true"] {
     background: var(--seg-selected-bg);
     box-shadow: var(--seg-shadow);
     color: var(--seg-selected-text);
   }
 
-  .pref-workflow-tab:focus-visible,
-  .title-language-tab:focus-visible {
+  .pref-workflow-tab:focus-visible {
     outline: 2px solid var(--focus-ring);
     outline-offset: 1px;
   }
 
-  .title-language-panel[hidden] {
+  /* ── Font editors in place, and the rows Preferences adds to the card ── */
+
+  /* A font's full editor, opened under its font button
+     (shared/composition-card: .cc-font-inline). The cards inside it lose
+     their own frame: the region around them is the frame. */
+  .pref-card-extras[hidden] {
     display: none;
+  }
+
+  .cc-font-inline .subsection-card {
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .cc-font-inline .subsection-card + .subsection-card,
+  .cc-font-inline .subsection-card + details.subsection-card {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #dde4ee;
+  }
+
+  .cc-font-inline .subsection-note {
+    margin-top: 0;
+  }
+
+  .cc-font-inline .inline-preview {
+    margin-bottom: 0;
+    background: #fff;
+  }
+
+  /* A row with a select (Title style, Language): the select on the right,
+     no wider than a font button. */
+  .pref-card-row > select,
+  .pref-card-row > .custom-select {
+    flex: 0 1 auto;
+    width: auto;
+    max-width: 62%;
+    min-width: 150px;
+  }
+
+  /* …and as low as a font button, so the rows line up. */
+  .pref-card-row .custom-select-button {
+    height: 28px;
+    padding: 0 8px;
+    border-color: var(--border);
+    border-radius: 6px;
+    font-size: 12px;
+  }
+
+  .pref-layout-rows {
+    margin-top: 0;
+  }
+
+  /* The emphasis mapping, under Commentary in the card. */
+  .cc-card .pref-card-details {
+    margin: 4px 0 0;
+    padding: 10px 12px;
+    background: #fff;
+  }
+
+  .cc-card .pref-card-details > .subsection-title {
+    margin: 0;
+    font-size: 13px;
+    cursor: pointer;
+  }
+
+  .cc-card .pref-card-details[open] > .subsection-title {
+    margin-bottom: 8px;
   }
 
   .link-override-fields {
@@ -1469,6 +1701,15 @@
     cursor: pointer;
   }
 
+  /* Moves an item into or out of Quick Actions: says so in words. */
+  .menu-layout-btn--move {
+    width: auto;
+    padding: 0 8px;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
   .menu-layout-btn:hover:not([disabled]) {
     background: #f1ece3;
   }
@@ -1498,6 +1739,132 @@
     font-weight: 600;
     cursor: pointer;
   }
+
+  /* ── Settings transfer modal (preferences/settings-file-js) ───────── */
+  .settings-transfer-dialog {
+    box-sizing: border-box;
+    width: min(540px, calc(100vw - 28px));
+    max-height: calc(100vh - 32px);
+    overflow: auto;
+    padding: 16px;
+    border: 1px solid #d7d3cb;
+    border-radius: 12px;
+    background: #fff;
+    color: #222;
+    box-shadow: 0 16px 40px rgba(0,0,0,.2);
+  }
+  .settings-transfer-dialog::backdrop { background: rgba(17,24,39,.35); }
+  .settings-transfer-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+  .settings-transfer-header h2 { font-size: 18px; margin: 0; }
+  .settings-transfer-target { display: grid; gap: 6px; padding: 10px; border: 1px solid #e3dfd8; border-radius: 8px; margin-bottom: 10px; }
+  .settings-transfer-target[hidden] { display: none; }
+  .settings-transfer-target > label { font-size: 13px; font-weight: 600; }
+  .settings-transfer-shared-row { display: flex; align-items: flex-start; gap: 6px; }
+  .settings-transfer-target .subsection-note { margin: 0; }
+
+
+  .settings-file-heading {
+    margin: 0 0 6px;
+    color: #253858;
+    font-size: 17px;
+    font-weight: 700;
+  }
+
+  .settings-file-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    margin: 0 0 10px;
+  }
+
+  .settings-file-label { font-size: 13px; font-weight: 600; }
+  .settings-file-optional { color: #5b6472; font-weight: 400; }
+  .settings-file-row input[type="text"] { flex: 1 1 220px; min-width: 0; }
+
+  .settings-file-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+
+  /* The file input is hidden behind this label, drawn as a button. */
+  .settings-file-pick {
+    display: inline-block;
+    padding: 6px 12px;
+    color: var(--control-text, #202124);
+    background: var(--control-bg-subtle, #fbfbfa);
+    border: 1px solid var(--control-border, #d9d8d3);
+    border-radius: var(--control-radius, 6px);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .settings-file-pick:hover { background: var(--control-bg-hover, #f1ece3); }
+
+  /* The hidden file input takes the focus; its label shows it. */
+  .settings-file-actions:focus-within .settings-file-pick {
+    outline: 2px solid #1f3b68;
+    outline-offset: 1px;
+  }
+
+  .settings-file-status { margin: 8px 0 0; font-size: 13px; color: #253858; }
+  .settings-file-status:empty { display: none; }
+  .settings-file-status.is-error { color: #a50e0e; }
+
+  .settings-file-fallback { margin-top: 10px; font-size: 13px; }
+  .settings-file-fallback[hidden] { display: none; }
+  .settings-file-fallback > summary { cursor: pointer; color: #1f3b68; font-weight: 600; }
+  .settings-file-fallback textarea {
+    display: block;
+    width: 100%;
+    margin: 8px 0;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12px;
+  }
+
+  .settings-import-preview {
+    margin-top: 12px;
+    padding: 12px;
+    background: #fff;
+    border: 1px solid #e3dfd8;
+    border-radius: 10px;
+  }
+
+  .settings-import-preview[hidden] { display: none; }
+  .settings-import-from { margin: 0 0 8px; font-size: 13px; }
+
+  .settings-import-groups {
+    margin: 0 0 10px;
+    padding: 0;
+    border: 0;
+  }
+
+  .settings-import-groups legend {
+    margin-bottom: 6px;
+    padding: 0;
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .settings-import-group {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    padding: 6px 0;
+    border-top: 1px solid #efece6;
+    font-size: 13px;
+    cursor: pointer;
+  }
+
+  .settings-import-group:first-child { border-top: 0; }
+  .settings-import-group input { margin-top: 2px; }
+  .settings-import-group-label { font-weight: 600; }
+  .settings-import-group-count { color: #5b6472; }
+  .settings-import-group-help { display: block; color: #5b6472; font-size: 12px; }
+  .settings-import-group.is-unchanged { color: #888; }
 
   /* ── Search tab: translation languages ────────────────────────────────── */
 
@@ -1589,6 +1956,13 @@
 
   .corpus-order-label {
     flex: 1 1 auto;
+  }
+
+  /* What a Lexicon dictionary is for, under its name. */
+  .corpus-order-note {
+    display: block;
+    color: #666;
+    font-size: 11px;
   }
 
   .corpus-order-actions {

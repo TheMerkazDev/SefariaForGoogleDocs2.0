@@ -13,6 +13,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { v3FixtureFetch } = require('./helpers/sefaria-v3-fixture');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const read = (relative) => fs.readFileSync(path.join(ROOT, relative), 'utf8');
@@ -25,14 +26,14 @@ function load(stored) {
   const context = {
     console,
     Logger: { log() {} },
-    UrlFetchApp: { fetch: () => ({ getResponseCode: () => 200, getContentText: () => JSON.stringify({ ref: 'Genesis 1:1', he: [FETCHED, 'יְהוָה'], text: ['In the beginning', 'God'], type: 'Tanakh' }) }) },
+    UrlFetchApp: { fetch: v3FixtureFetch({ ref: 'Genesis 1:1', he: [FETCHED, 'יְהוָה'], text: ['In the beginning', 'God'], type: 'Tanakh' }) },
     PropertiesService: { getUserProperties: () => ({ getProperty: (key) => (key in stored ? stored[key] : null) }) },
     expandCitationAbbreviations_: () => [],
     normalizeReferenceInput: (r) => r,
     stripHebrewNumeralMarks_: (r) => r
   };
   vm.createContext(context);
-  ['apps-script/server/text-processing.gs', 'apps-script/server/preferences.gs', 'apps-script/server/sefaria-fetch.gs'].forEach((relative) => {
+  ['apps-script/server/source-text.gs', 'apps-script/server/text-processing.gs', 'apps-script/server/preferences.gs', 'apps-script/server/sefaria-fetch.gs'].forEach((relative) => {
     vm.runInContext(read(relative), context, { filename: relative });
   });
   return context;
@@ -74,6 +75,6 @@ test('a payload without a source (an older client) falls back to the Hebrew', ()
 });
 
 test('the sidebar preview transliterates the same source', () => {
-  const js = read('apps-script/sidebar/js/preview-render.html');
+  const js = read('apps-script/sidebar/js/preview-core.html');
   assert.match(js, /dataIn\.heTransliterationSource/);
 });

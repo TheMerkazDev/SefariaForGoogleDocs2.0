@@ -13,6 +13,7 @@ const SETTINGS = [
   "god_replacement",
   "hebrew_font",
   "hebrew_font_size",
+  "auto_scale_hebrew",
   "hebrew_font_style",
   "include_translation_source_info",
   "include_transliteration_default",
@@ -24,6 +25,7 @@ const SETTINGS = [
   "linker_review_mode",
   "show_line_markers_default",
   "source_emphasis_mode",
+  "source_notes_mode",
   "hebrew_font_color",
   "hebrew_font_background",
   "translation_font_color",
@@ -51,6 +53,10 @@ const SETTINGS = [
   "last_search_relevance_sort",
   "search_corpus_order",
   "search_corpus_excluded",
+  "lexicon_dictionary_order",
+  "lexicon_dictionary_excluded",
+  "voices_topic_order",
+  "voices_topic_excluded",
   "hidden_translation_languages",
   "show_unavailable_translations",
   "meforash_replace",
@@ -72,9 +78,11 @@ const SETTINGS = [
   "transliteration_font_size",
   "transliteration_font_style",
   "transliteration_scheme",
+  "transliteration_position",
   "transliteration_overrides",
   "transliteration_is_biblical_hebrew",
   "transliteration_biblical_dagesh_mode",
+  "transliteration_divine_name",
   "versioning",
   "voices_insert_mode_default",
   "voices_translit_default",
@@ -101,12 +109,18 @@ const SETTINGS = [
   "hebrew_link_font_background",
   "sefaria_link_format_override",
   "hebrew_link_format_override",
+  "sefaria_link_edition_label",
+  "hebrew_link_edition_label",
   "citation_font",
   "citation_font_size",
   "citation_font_style",
   "citation_font_color",
   "citation_font_background",
   "search_mode",
+  "show_voices_tab",
+  "show_lexicon_tab",
+  "sidebar_quick_actions_hidden",
+  "sidebar_options_hidden",
   "menu_layout",
   "insert_from_selection_replace"
 ];
@@ -114,8 +128,7 @@ const SETTINGS = [
 //returns the user preference w.r.t. displaying the versioning dropdowns in the insertion module
 function getVersioningPreference() {
   try {
-    const userProperties = PropertiesService.getUserProperties();
-    return userProperties.getProperty("versioning");
+    return snapshotProperties_().getProperty("versioning");
   } catch (error) {
     Logger.log(`The system has made a mach'ah: ${error.message}`);
     return true;
@@ -138,6 +151,8 @@ function getDefaultPreferences() {
     // with a heading style, the heading's own).
     hebrew_font: "",
     hebrew_font_size: "",
+    // New opt-in enlargement; existing documents retain their exact formatting.
+    auto_scale_hebrew: false,
     hebrew_font_style: "normal",
     // Credit line (edition and license) under every inserted source. On by
     // default: many Sefaria texts are CC-BY / CC-BY-NC and require attribution.
@@ -162,13 +177,18 @@ function getDefaultPreferences() {
     linker_review_mode: "summary",
     link_sources_insert_after_linking: false,
     show_line_markers_default: true,
-    // Sefaria marks up its own emphasis (the Steinsaltz Talmud bolds the Talmud's
-    // words against Steinsaltz's interpolation). "keep" by default: the source
-    // knows what it meant, and the font-style preference still sets the
-    // baseline. "discard" flattens it; "only" keeps the emphasized words and
-    // drops the rest. See normalizeSourceEmphasisMode_. Replaced the boolean
-    // `preserve_source_emphasis` in schema v14.
+    // Edition-specific inline commentary: keep as marked, combine, or drop.
+    // Verified profiles live in source-text.gs. Unknown editions keep all
+    // words and formatting. Values retain their schema-v14 names.
     source_emphasis_mode: "keep",
+    // Marked Sefaria footnotes: omit preserves the previous inserted output.
+    // Preview and insertion now share this policy. Inline / Separate are new.
+    source_notes_mode: "separate",
+    // Workflow defaults previously existed only in the controls' fallbacks.
+    // Keep them here too so Reset, settings files and profiles agree.
+    voices_insert_mode_default: "reference",
+    voices_translit_default: "none",
+    lexicon_insert_mode_default: "entry",
     // Colour and background are intentionally EMPTY by default: an empty
     // value means "leave the document's own formatting alone". Defaulting to
     // "#000000" would force black text on every user, including those with a
@@ -197,9 +217,10 @@ function getDefaultPreferences() {
     emphasis_italic_font: "",
     output_mode_default: "both",
     bilingual_layout_default: "he-right",
-    // Right–Left / Left–Right: true gives each line (verse) its own table row,
-    // beside its translation; false keeps the whole passage in one row, as
-    // side-by-side inserts always were.
+    // "Line by line". Right–Left / Left–Right: true gives each line (verse)
+    // its own table row, beside its translation. Stacked (schema 30): each
+    // line, then its translation, going down the page. False keeps the whole
+    // passage in one row, or one block per language, as inserts always were.
     bilingual_aligned_rows: false,
     last_translation_languages: JSON.stringify(["en"]),
     last_translation_only_filter: false,
@@ -210,6 +231,16 @@ function getDefaultPreferences() {
     // then Sefaria's library order); "[]" exclusions hides nothing.
     search_corpus_order: "[]",
     search_corpus_excluded: "[]",
+    // Lexicon dictionaries, ordered and hidden like corpora (JSON arrays of
+    // dictionary keys, LEXICON_DICTIONARY_CATALOG in shared/ui/state). "[]"
+    // order is the built-in one; "[]" exclusions hides nothing.
+    lexicon_dictionary_order: "[]",
+    lexicon_dictionary_excluded: "[]",
+    // Voices topic categories, ordered and hidden like corpora (JSON arrays
+    // of topic keys, VOICES_TOPIC_CATALOG in shared/ui/state). "[]" order is
+    // the built-in one; "[]" exclusions hides nothing.
+    voices_topic_order: "[]",
+    voices_topic_excluded: "[]",
     // Translation languages left out of the search language filter and the
     // translation version list (JSON array of codes). "[]" shows them all.
     hidden_translation_languages: "[]",
@@ -231,8 +262,8 @@ function getDefaultPreferences() {
     translation_font: "",
     translation_font_size: "",
     translation_font_style: "normal",
-    // Translation formatting for particular languages (Preferences → Fonts →
-    // Translation → Advanced), as JSON: {"fr": {font, size, style}, ...}.
+    // Translation formatting for particular languages (Preferences → Insertion,
+    // the translation's Text font → Advanced), as JSON: {"fr": {font, size, style}, ...}.
     // "{}" means every language uses the Translation settings above. An empty
     // font or size in an entry also falls back to them.
     translation_language_typography: "{}",
@@ -240,9 +271,19 @@ function getDefaultPreferences() {
     transliteration_font_size: "",
     transliteration_font_style: "italic",
     transliteration_scheme: "traditional",
+    // Where the transliteration goes in the side-by-side layouts: "below"
+    // the Hebrew, in its column (what it has always done), or a column of
+    // its own "left" or "right" of the Hebrew's. Stacked and Hebrew-only
+    // inserts always put it below the Hebrew. normalizeTransliterationPosition_
+    // in insertion.gs reads anything else as "below".
+    transliteration_position: "below",
     transliteration_overrides: "{}",
     transliteration_is_biblical_hebrew: true,
     transliteration_biblical_dagesh_mode: "none",
+    // How the transliteration writes the Name (יהוה and its substitutes), in
+    // every style (schema 31): "HaShem", as it always has, or the reader's
+    // own ("Adonai", "Adonoy", "Hashem", "G-d"...).
+    transliteration_divine_name: "HaShem",
     versioning: true,
     yaw_replace: false,
     yaw_replacement: "קה",
@@ -277,6 +318,11 @@ function getDefaultPreferences() {
     // own. True is how linked titles have always looked.
     sefaria_link_format_override: true,
     hebrew_link_format_override: true,
+    // A linked title names the edition it links to: "Genesis 1:1
+    // (Translation • The Koren Jerusalem Bible)". On, as linked titles always
+    // were; off, a linked title is the reference alone. Schema v26.
+    sefaria_link_edition_label: true,
+    hebrew_link_edition_label: true,
     // The citation under an inserted source (edition and license). The
     // defaults are its look from before it could be set: 8 pt italic, in the
     // font of the text above it (an empty font or size keeps that text's,
@@ -287,6 +333,20 @@ function getDefaultPreferences() {
     citation_font_color: "",
     citation_font_background: "",
     search_mode: "texts",
+    // Preferences → Sidebar (schema v29). The sidebar's Voices and Lexicon
+    // tabs, beside Texts under the search box: on, since every user has had
+    // them (Simple mode hid them until v29). Off hides the tab with CSS only;
+    // a menu item can still open that search, and its tab shows while it is
+    // open. Texts has no switch.
+    show_voices_tab: true,
+    show_lexicon_tab: true,
+    // The sidebar's Quick Actions buttons and Insertion Options controls the
+    // user has hidden, as JSON arrays of ids (SIDEBAR_QUICK_ACTIONS_,
+    // SIDEBAR_OPTION_CONTROLS_). "[]": every one shows, as it always has. A
+    // hidden Insertion Options control keeps its effective value, including
+    // an existing sidebar session override; visibility never resets a value.
+    sidebar_quick_actions_hidden: "[]",
+    sidebar_options_hidden: "[]",
     // Order and nesting of the add-on menu, edited from the Menu Bar tab. See
     // server/menu-layout.gs for the shape. Replaced `insert_from_selection_at_top`
     // in schema v10; the migration carries a pinned item over.
@@ -308,13 +368,124 @@ function getDefaultPreferences() {
     first_run_setup: "pending",
     // The menu_layout a user had before switching to Simple, restored when they
     // switch back ("" = they had none, i.e. the code default).
-    menu_layout_before_simple: ""
+    menu_layout_before_simple: "",
+    // Settings profiles (server/settings-profiles.gs): the index of the user's
+    // named profiles and which one is in use, as JSON. "" = none made yet: the
+    // settings in use are the only set. Not in SETTINGS: written only by the
+    // profile functions, never by setPreferences or a settings file.
+    settings_profiles: ""
   };
 }
 
-function readUserPreferenceObject_() {
+// ── Sidebar controls (Preferences → Sidebar) ──────────────────────────────
+// What the sidebar shows, apart from what Simple mode hides:
+//   - its result tabs: "texts", always, then "voices" and "lexicon" unless
+//     switched off (show_voices_tab, show_lexicon_tab). A missing value counts
+//     as on, since every user has had both tabs (migrateToV29_);
+//   - the Quick Actions (🏃) buttons and the Insertion Options controls the
+//     user hid (sidebar_quick_actions_hidden, sidebar_options_hidden: JSON
+//     arrays of the ids below; unknown ids are dropped).
+// The sidebar prints these into its root's data-sidebar-tabs,
+// data-quick-actions-hidden and data-options-hidden attributes
+// (openSharedSidebar_), and its CSS hides by them, never removing anything
+// (css/components/sidebar-controls). sidebar/js/mode-controller keeps a copy
+// of these rules (sidebarControlsFromPreferences) for a save made while it is
+// open, and Preferences' Sidebar tab lists the same ids; tests keep the three
+// in step.
+var SIDEBAR_TAB_SWITCHES_ = { voices: 'show_voices_tab', lexicon: 'show_lexicon_tab' };
+var SIDEBAR_QUICK_ACTIONS_ = ['insert_from_selection', 'transform_divine_names', 'link_texts'];
+var SIDEBAR_OPTION_CONTROLS_ = [
+  'display', 'arrangement', 'citation', 'line_by_line', 'line_numbers',
+  'source_link', 'vowels', 'cantillation', 'hebrew_punctuation', 'transliteration',
+  'translation_link', 'translation_punctuation', 'commentary',
+  'title_fonts', 'text_fonts'
+];
+
+function sidebarTabsFromPreferences_(prefs) {
+  var p = prefs || {};
+  var tabs = ['texts'];
+  Object.keys(SIDEBAR_TAB_SWITCHES_).forEach(function (tab) {
+    if (String(p[SIDEBAR_TAB_SWITCHES_[tab]]) !== 'false') tabs.push(tab);
+  });
+  return tabs;
+}
+
+/** The known ids in a stored JSON list, in catalog order; junk hides nothing. */
+function sidebarHiddenIds_(raw, known) {
+  var list = [];
+  try { list = JSON.parse(String(raw == null || raw === '' ? '[]' : raw)); } catch (error) { list = []; }
+  if (!Array.isArray(list)) list = [];
+  return known.filter(function (id) { return list.indexOf(id) >= 0; });
+}
+
+function sidebarControlsFromPreferences_(prefs) {
+  var p = prefs || {};
+  return {
+    tabs: sidebarTabsFromPreferences_(p),
+    quickActionsHidden: sidebarHiddenIds_(p.sidebar_quick_actions_hidden, SIDEBAR_QUICK_ACTIONS_),
+    optionsHidden: sidebarHiddenIds_(p.sidebar_options_hidden, SIDEBAR_OPTION_CONTROLS_)
+  };
+}
+
+/**
+ * The mode the sidebar opens in. A mode asked for by name (the Voices or
+ * Lexicon menu item) is honoured even with its tab switched off: the menu is
+ * the user's own (Menu Bar), and the tab shows while its search is open.
+ * Otherwise the last mode used comes back only while its tab is on, so
+ * switching a tab off never reopens the sidebar on it.
+ *
+ * @param {?string} requested  the mode a menu item named, or null
+ * @param {string} last        the stored search_mode
+ * @param {string[]} tabs      sidebarTabsFromPreferences_()
+ */
+function resolveSidebarOpenMode_(requested, last, tabs) {
+  if (requested) return requested;
+  var switchable = Object.prototype.hasOwnProperty.call(SIDEBAR_TAB_SWITCHES_, last);
+  return switchable && (tabs || []).indexOf(last) < 0 ? 'texts' : last;
+}
+
+var SIDEBAR_CONTROL_KEYS_ = ['show_voices_tab', 'show_lexicon_tab', 'sidebar_quick_actions_hidden', 'sidebar_options_hidden'];
+
+/** The sidebar's controls from storage, read once; everything shows if it can't be read. */
+function getSidebarControls_() {
+  try {
+    var stored = snapshotProperties_();
+    var prefs = {};
+    SIDEBAR_CONTROL_KEYS_.forEach(function (key) { prefs[key] = stored.getProperty(key); });
+    return sidebarControlsFromPreferences_(prefs);
+  } catch (error) {
+    return sidebarControlsFromPreferences_({});
+  }
+}
+
+/**
+ * The stored preferences as a read-only getProperty source, read from storage
+ * once. Every reader here asks for dozens of keys; asking UserProperties for
+ * each one made a Link Texts rerun ~310 separate storage reads in three
+ * executions, two of them in parallel, and that rerun failed with "a server
+ * error occurred while reading from storage ... RESOURCE_EXHAUSTED" (BUG-012).
+ * One getProperties() call per reader is the same data. A `source` without
+ * getProperties (preferenceOverlay_, which reads through this itself) is
+ * returned as it is.
+ */
+function snapshotProperties_(source) {
+  const properties = source || PropertiesService.getUserProperties();
+  if (typeof properties.getProperties !== 'function') return properties;
+  const all = properties.getProperties() || {};
+  if (!source && typeof documentPreferencesKey_ === 'function') {
+    const key = documentPreferencesKey_();
+    if (key && all[key]) Object.assign(all, readDocumentPreferenceValues_(all[key]));
+  }
+  return {
+    getProperty: function (key) {
+      return Object.prototype.hasOwnProperty.call(all, key) ? all[key] : null;
+    }
+  };
+}
+
+function readUserPreferenceObject_(source) {
   const defaults = getDefaultPreferences();
-  const preferences = PropertiesService.getUserProperties();
+  const preferences = snapshotProperties_(source);
   const out = {};
   for (let i = 0; i < SETTINGS.length; i++) {
     const key = SETTINGS[i];
@@ -360,23 +531,23 @@ function clearSidebarSessionState(sessionId) {
 }
 
 function getAccountPreferences() {
-  return readUserPreferenceObject_();
+  return readUserPreferenceObject_(PropertiesService.getUserProperties());
 }
 
 function setAccountPreferences(preferenceObject) {
   setPreferences(preferenceObject || {});
-  return getAccountPreferences();
+  return getPreferences();
 }
 
 function saveSidebarSessionAsAccountDefaults(sessionId) {
   const sessionState = getSidebarSessionState(sessionId);
   setPreferences(sessionState || {});
   clearSidebarSessionState(sessionId);
-  return getAccountPreferences();
+  return getPreferences();
 }
 
 function getPreferences() {
-  return getAccountPreferences();
+  return readUserPreferenceObject_();
 }
 
 /**
@@ -387,10 +558,12 @@ function getPreferences() {
  */
 function preferenceOverlay_(overrides) {
   const values = overrides || {};
+  let stored = null;
   return {
     getProperty: function (key) {
       if (Object.prototype.hasOwnProperty.call(values, key)) return String(values[key]);
-      return PropertiesService.getUserProperties().getProperty(key);
+      if (!stored) stored = snapshotProperties_();
+      return stored.getProperty(key);
     }
   };
 }
@@ -478,16 +651,16 @@ function readEmphasisMapping_(userProperties, prefix, fallbackStyle) {
 }
 
 /**
- * What happens to the bold and italics in Sefaria's own markup:
- *   "keep"    — re-applied on top of the user's font style (the default).
- *   "discard" — dropped; the user's font style applies uniformly.
- *   "only"    — only the emphasized words are kept, e.g. just the Talmud's
- *               own words (bold) out of the Steinsaltz translation.
- * Also accepts the boolean `preserve_source_emphasis` values ("true"/"false")
- * it replaced, so a value that was never migrated still means what it meant.
- * Anything unrecognised is "keep", the default.
+ * Default / Combine / Drop keep their historical stored values. The shared
+ * source reader applies the verified edition's convention: bold base text
+ * for Davidson, brackets for Silverstein. Unknown editions are preserved.
+ * Legacy preserve_source_emphasis booleans still normalize as before.
  */
 var SOURCE_EMPHASIS_MODES_ = ["keep", "discard", "only"];
+
+function normalizeSourceNotesMode_(value) {
+  return value === "inline" || value === "omit" ? value : "separate";
+}
 
 function normalizeSourceEmphasisMode_(value) {
   const v = String(value == null ? "" : value).trim().toLowerCase();
@@ -554,7 +727,7 @@ function fillTypographyFromSurroundingText_(roles, surrounding, titleHeading) {
  *        typographyPropertiesFor_).
  */
 function getTypographySettings(properties) {
-  const userProperties = properties || PropertiesService.getUserProperties();
+  const userProperties = snapshotProperties_(properties);
 
   const roles = {
     hebrew:          readTypographyRole_(userProperties, "hebrew", "", null, "normal"),
@@ -573,6 +746,12 @@ function getTypographySettings(properties) {
     en: userProperties.getProperty("sefaria_link_format_override") !== "false",
     he: userProperties.getProperty("hebrew_link_format_override") !== "false"
   };
+  // Whether a linked title names its edition (unset is on: linked titles
+  // always did). See linkedTitleText_ in insertion.gs.
+  const linkEditionLabel = {
+    en: userProperties.getProperty("sefaria_link_edition_label") !== "false",
+    he: userProperties.getProperty("hebrew_link_edition_label") !== "false"
+  };
 
   if (typographyNeedsSurroundingText_(roles, titleHeading)) {
     let surrounding = null;
@@ -581,13 +760,17 @@ function getTypographySettings(properties) {
     } catch (error) {
       surrounding = null;
     }
+    const scaleHebrew = String(userProperties.getProperty("auto_scale_hebrew")) === "true" &&
+      roles.hebrew.font === "" && roles.hebrew.size == null;
     fillTypographyFromSurroundingText_(roles, surrounding, titleHeading);
+    if (scaleHebrew) applyMatchedHebrewScale_(roles.hebrew, surrounding);
   }
 
   return {
     roles: roles,
     titleHeading: titleHeading,
     linkFormatOverride: linkFormatOverride,
+    linkEditionLabel: linkEditionLabel,
     translationLanguages: normalizeTranslationLanguageTypography_(
       userProperties.getProperty("translation_language_typography")
     ),
@@ -611,6 +794,8 @@ function getTypographySettings(properties) {
     sefariaLinkFontStyle: roles.sefariaLink.style,
 
     sourceEmphasisMode: normalizeSourceEmphasisMode_(userProperties.getProperty("source_emphasis_mode")),
+    sourceNotesMode: normalizeSourceNotesMode_(userProperties.getProperty("source_notes_mode")),
+    extendedGemara: userProperties.getProperty("extended_gemara") === "true",
     emphasisMap: {
       bold: readEmphasisMapping_(userProperties, "emphasis_bold", "bold"),
       italic: readEmphasisMapping_(userProperties, "emphasis_italic", "italic")

@@ -15,6 +15,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { v3FixtureFetch } = require('./helpers/sefaria-v3-fixture');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const TYPES = { PARAGRAPH: 'PARAGRAPH', LIST_ITEM: 'LIST_ITEM', TEXT: 'TEXT', BODY_SECTION: 'BODY_SECTION', TABLE: 'TABLE' };
@@ -89,9 +90,10 @@ function load(body, prefs) {
     }
   };
   vm.createContext(context);
-  ['apps-script/transliteration.gs', 'apps-script/server/linker-prefilter.gs', 'apps-script/server/document-actions.gs'].forEach((relative) => {
+  ['apps-script/server/preferences.gs', 'apps-script/transliteration.gs', 'apps-script/server/linker-prefilter.gs', 'apps-script/server/document-actions.gs'].forEach((relative) => {
     vm.runInContext(fs.readFileSync(path.join(ROOT, relative), 'utf8'), context, { filename: relative });
   });
+  context.getPreferences = () => Object.assign({}, prefs);
   return { context, calls, fetched };
 }
 
@@ -162,17 +164,20 @@ test('overrides from "Customize this insertion" reach the insert and the fetch, 
     show_line_markers_default: false,
     nekudot: false,
     transliteration_scheme: 'ashkenazi',
+    transliteration_position: 'right',
     source_emphasis_mode: 'only',
     // Not overridable, or not a valid value: dropped.
     linker_upload_acknowledged: 'true',
     bilingual_layout_default_typo: 'x',
     teamim: 'sometimes',
-    include_transliteration_default: 'yes'
+    include_transliteration_default: 'yes',
+    bilingual_aligned_rows: 'sometimes'
   });
   assert.equal(calls[0].singleLanguage, 'he');
   assert.equal(calls[0].bilingualLayout, 'he-top');
   assert.equal(calls[0].pasukPreference, false);
   assert.equal(calls[0].transliterationScheme, 'ashkenazi');
+  assert.equal(calls[0].transliterationPosition, 'right');
   assert.equal(calls[0].sourceEmphasisMode, 'only');
   // Vowels are stripped at fetch time, so the override goes to the fetch.
   assert.deepEqual(Object.assign({}, fetched[0]), {
@@ -181,8 +186,12 @@ test('overrides from "Customize this insertion" reach the insert and the fetch, 
     show_line_markers_default: 'false',
     nekudot: 'false',
     transliteration_scheme: 'ashkenazi',
+    transliteration_position: 'right',
     source_emphasis_mode: 'only'
   });
+  // An unknown position is dropped too.
+  context.insertLinkedSourceAtPosition('Genesis 1:1', decisionFor(body, 'Genesis 1:1'), { transliteration_position: 'sideways' });
+  assert.equal(fetched[1].transliteration_position, undefined);
 });
 
 test('an unknown transliteration scheme is dropped', () => {
@@ -214,7 +223,7 @@ test('a vowels override is applied when the text is fetched, without touching st
   const context = {
     console,
     Logger: { log() {} },
-    UrlFetchApp: { fetch: () => ({ getResponseCode: () => 200, getContentText: () => JSON.stringify({ ref: 'Genesis 1:1', he: ['בְּרֵאשִׁ֖ית'], text: ['In the beginning'], type: 'Tanakh' }) }) },
+    UrlFetchApp: { fetch: v3FixtureFetch({ ref: 'Genesis 1:1', he: ['בְּרֵאשִׁ֖ית'], text: ['In the beginning'], type: 'Tanakh' }) },
     PropertiesService: { getUserProperties: () => ({
       getProperty: (key) => (key in stored ? stored[key] : null),
       setProperty: (key, value) => writes.push([key, value])
@@ -226,7 +235,7 @@ test('a vowels override is applied when the text is fetched, without touching st
     stripHebrewNumeralMarks_: (r) => r
   };
   vm.createContext(context);
-  ['apps-script/server/text-processing.gs', 'apps-script/server/preferences.gs', 'apps-script/server/sefaria-fetch.gs'].forEach((relative) => {
+  ['apps-script/server/source-text.gs', 'apps-script/server/text-processing.gs', 'apps-script/server/preferences.gs', 'apps-script/server/sefaria-fetch.gs'].forEach((relative) => {
     vm.runInContext(fs.readFileSync(path.join(ROOT, relative), 'utf8'), context, { filename: relative });
   });
   assert.equal(context.findReferenceWithPreferences_('Genesis 1:1', { nekudot: 'false', teamim: 'false' }).he[0], 'בראשית');

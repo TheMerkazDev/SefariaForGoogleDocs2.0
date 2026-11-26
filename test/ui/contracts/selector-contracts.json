@@ -7,11 +7,11 @@
       ".results-panel",
       "data-sidebar-mode=\"texts\"",
       "data-sidebar-mode=\"experimental\"",
-      "#sm-inline-launch",
-      "#sm-inline-term",
+      "#exp-card-surprise",
       "#voices-insert-mode",
       ".voices-insert-options",
       ".source-emphasis-mode",
+      ".source-notes-mode",
       ".wants-hebrew-punctuation",
       ".wants-translation-punctuation",
       ".wants-aligned-rows",
@@ -26,6 +26,7 @@
     "requiredSelectors": [
       "#source_title_font",
       "#hebrew_font",
+      "#auto_scale_hebrew",
       "#transliteration_scheme",
       "#output_mode_default",
       "#bilingual_layout_default",
@@ -33,20 +34,33 @@
       "#menu-layout-top",
       "#menu-layout-quick-actions",
       "#source_emphasis_mode",
+      "#source_notes_mode",
       "#hebrew_punctuation",
       "#translation_punctuation",
       "#bilingual_aligned_rows",
-      "#show_advanced_settings",
-      "#interface-mode-status"
+      "#interface-mode-note",
+      "#interface-mode-status",
+      "#settings-transfer-open",
+      "#settings-transfer-modal",
+      "#settings-transfer-close",
+      "#settings-transfer-target",
+      "#settings-transfer-shared",
+      "#pref-profile-rename",
+      "#settings-export",
+      "#settings-import-file",
+      "#settings-import-preview",
+      "#settings-import-apply"
     ]
   },
   "surprise_me": {
-    "template": "apps-script/surprise-me.html",
+    "template": "apps-script/shared/surprise-me/markup.html",
     "requiredSelectors": [
+      "#surprise-form",
       "#surprise-term",
       "#surprise-count",
       "#toggle-all-corpuses",
       "#surprise-submit",
+      "#surprise-cancel",
       "#surprise-status"
     ]
   },
@@ -76,7 +90,8 @@
       "#cc-translation-punct-toggle",
       "#cc-translation-preview",
       ".cc-pill-row",
-      ".cc-translation"
+      ".cc-translation",
+      "#cc-notes-toggle"
     ]
   },
   "first-run-setup": {

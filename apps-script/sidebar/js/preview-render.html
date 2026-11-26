@@ -18,41 +18,29 @@ function flattenSegments_(value) {
   return value == null ? '' : String(value);
 }
 
-function removePreviewTransliteration() {
-  $('.preview-transliteration').remove();
-}
-
-function renderPreviewTransliteration(dataIn) {
-  removePreviewTransliteration();
-  if (!$('.include-transliteration').is(':checked')) return;
-  if (($('.output-mode-selection').val() || 'both') === 'en') return;
-  // The Hebrew as fetched, vowels kept and the Hebrew punctuation setting
-  // applied (server attachTransliterationSource_), not the Hebrew as displayed.
-  var source = dataIn ? (dataIn.heTransliterationSource !== undefined ? dataIn.heTransliterationSource : dataIn.he) : '';
-  var plain = extractTextFromHtml_(flattenSegments_(source));
-  if (!plain) return;
-  var refAtRequest = String((dataIn && dataIn.ref) || '');
+function renderPreviewTransliteration(sources) {
+  if (!sources.length) return;
+  // Capture this render's nodes. If a new layout, selection or loading state
+  // replaces them, a late response can only update the detached nodes.
+  var $targets = $('.preview-section .preview-transliteration');
+  if (!$targets.length) return;
+  var plain = sources.map(function (source) {
+    // Read pointed Hebrew and omit source note markers and bodies, just as
+    // insertion does. Keep blanks in the batch to preserve row coordinates.
+    var html = processSourceText_(flattenSegments_(source), { commentaryProfile: 'none', notesMode: 'omit' }).html;
+    return extractTextFromHtml_(html.replace(/<br\s*\/?>/gi, ' '));
+  });
+  if (!plain.some(Boolean)) return;
   google.script.run.withSuccessHandler(function (text) {
-    if (!text) return;
-    if (refAtRequest && data && data.ref && String(data.ref) !== refAtRequest) return;
-    if (!$('.include-transliteration').is(':checked')) return;
-    var $target = $('.suggestions .preview-transliteration');
-    if (!$target.length) {
-      var $anchor = $('.suggestions .preview-he').last();
-      if ($anchor.length) {
-        $anchor.after("<div class='preview-transliteration'></div>");
-        $target = $('.suggestions .preview-transliteration').last();
-      } else {
-        $('.suggestions').append("<div class='preview-transliteration'></div>");
-        $target = $('.suggestions .preview-transliteration').last();
-      }
-    }
-    $target.text(String(text));
-  }).previewTransliterationWithOverrides(plain, getSidebarTransliterationScheme());
+    if (!Array.isArray(text)) return;
+    $targets.each(function (index) {
+      $(this).text(text[index] || '');
+    });
+  }).previewTransliterationWithOverrides(plain, getSidebarTransliterationScheme(), typeof sidebarSessionId === 'undefined' ? null : sidebarSessionId);
 }
 
 function refreshSidebarLivePreview() {
-  if (!hasResolvedReference || !data || !data.ref || typeof updateSuggestion !== 'function') return;
+  if (appMode !== 'texts' || !hasResolvedReference || !data || !data.ref || typeof updateSuggestion !== 'function') return;
   updateSuggestion(data, selectedResultSummary ? selectedResultSummary.label : data.ref);
 }
 

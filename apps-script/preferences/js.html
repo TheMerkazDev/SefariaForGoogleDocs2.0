@@ -1,25 +1,54 @@
 <script>
   document.addEventListener('DOMContentLoaded', function () {
+    // Deuteronomy 11:18 (וְשַׂמְתֶּם אֶת־דְּבָרַי אֵלֶּה עַל־לְבַבְכֶם) as the engine
+    // writes it; see CC_TRANSLIT_LABELS (shared/composition-card/shared).
     const transliterationExamples = {
-      simple_english: "Ve-samtem et devarai eileh al levavchem",
-      traditional: "Vəśamtem ʾet-dəvaray ʾēleh ʿal-ləvavḵem",
-      modern_israeli: "Ve-samtem et devarai eleh al levavkhem",
-      ashkenazi: "Ve-samtem es devarai eileh al levavchem",
-      academic_full: "Wəśamtem ʾet-dəvaray ʾēlleh ʿal-ləvavḵem",
-      ipa_modern: "ve-samtem et dvarai ele al levavχem",
-      ipa_tiberian: "wəsamtem ʔet dəvaʁaj ʔele ʕal ləvavχem"
+      simple_english: "Vesamtem et\u05BEdevarai eleh al\u05BElevavkhem",
+      traditional: "Vesamtem et\u05BEdevarai eleh \u02BFal\u05BElevavkhem",
+      modern_israeli: "Vesamtem et\u05BEdevarai eleh al\u05BElevavchem",
+      ashkenazi: "Vesamtem es\u05BEdevorai eileh al\u05BElevavkhem",
+      academic_full: "W\u0259\u015Bamtem \u02BEe\u1E6F\u05BEd\u0259v\u0101ray \u02BE\u0113leh \u02BFal\u05BEl\u0259vav\u1E35em",
+      ala_lc: "\u1E7Ee-\u015Bamtem et\u05BEdevarai eleh \u02BBal\u05BElevavkhem",
+      bgn_pcgn: "Vesamtem et\u05BEdevaray elle \u2018al\u05BElevavkhem",
+      ipa_modern: "vesamtem \u0294et\u05BEdeva\u0281aj \u0294ele \u0294al\u05BElevav\u03C7em",
+      ipa_tiberian: "w\u0259samt\u025Bm \u0294\u025B\u03B8\u05BEd\u0259v\u0254\u02D0raj \u0294e\u02D0l\u025B \u0295al\u05BEl\u0259vav\u03C7\u025Bm"
     };
+    // The sample as the insert writes it: the maqaf (kept above as the Hebrew mark) a hyphen.
+    function transliterationExampleText(scheme) {
+      return (transliterationExamples[scheme] || transliterationExamples.simple_english).replace(/\u05BE/g, '-');
+    }
 
     const FONT_SIZE_FIELDS = ['hebrew_font_size','translation_font_size','transliteration_font_size','source_title_font_size','sefaria_link_font_size','hebrew_title_font_size','hebrew_link_font_size','citation_font_size'];
-    // The four title styles (Fonts → Title): the translation title's plain and
+    // The four title styles (the title font editors): the translation title's plain and
     // linked, and the source (Hebrew) title's. Each has prefix_font, _font_size,
     // _font_style, _font_color, _font_background and a prefix_preview.
     const TITLE_FONT_PREFIXES = ['source_title', 'sefaria_link', 'hebrew_title', 'hebrew_link'];
     // Roles laid out like the titles (prefix_font … prefix_preview): the
-    // titles and the citation under each source (Fonts → Citation).
+    // titles and the citation under each source (Layout → Citation style).
     const STYLED_FONT_PREFIXES = TITLE_FONT_PREFIXES.concat(['citation']);
 
     const overrideChars = ["א","ב","ג","ד","ה","ו","ז","ח","ט","י","כ","ך","ל","מ","ם","נ","ן","ס","ע","פ","ף","צ","ץ","ק","ר","ש","ת"];
+    // The vowel signs Transliteration Mapping can change, each wherever it is
+    // pronounced (transliteration.gs: vowelSound_): a sh'va only where it is
+    // spoken, hiriq and tsere with their yod too, holam with its vav, kubutz
+    // for shuruk too. Shown on a dotted circle.
+    const overrideMarks = [
+      { ch: "\u05B7", name: "Patach" },
+      { ch: "\u05B8", name: "Kamatz" },
+      { ch: "\u05C7", name: "Kamatz katan" },
+      { ch: "\u05B6", name: "Segol" },
+      { ch: "\u05B5", name: "Tsere (and tsere with yod)" },
+      { ch: "\u05B4", name: "Hiriq (and hiriq with yod)" },
+      { ch: "\u05B9", name: "Holam (and holam with vav)" },
+      { ch: "\u05BB", name: "Kubutz and shuruk" },
+      { ch: "\u05B0", name: "Sh'va, where it is spoken" },
+      { ch: "\u05B2", name: "Hataf patach" },
+      { ch: "\u05B1", name: "Hataf segol" },
+      { ch: "\u05B3", name: "Hataf kamatz" }
+    ];
+    function overrideLabel(ch) {
+      return /[\u05B0-\u05C7]/.test(ch) ? "\u25CC" + ch : ch;
+    }
     const customReplacementFields = [
       'meforash_replacement',
       'yaw_replacement',
@@ -88,6 +117,13 @@
       return chosen || (typeof _ccDocumentFont === 'string' ? _ccDocumentFont : '') || '';
     }
 
+    function syncAutoScaleHebrew() {
+      const row = byId('auto-scale-hebrew-row');
+      const font = byId('hebrew_font');
+      const size = byId('hebrew_font_size');
+      if (row) row.hidden = !font || !size || !!font.value || !!size.value;
+    }
+
     function updateFontPreview(selectId, previewId) {
       const preview = byId(previewId);
       if (!preview) return;
@@ -100,6 +136,12 @@
       if (sample) {
         if (sample.dataset.sample == null) sample.dataset.sample = sample.textContent;
         renderHebrewPreviewText(sample, sample.dataset.sample, font);
+        if (selectId === 'hebrew_font') {
+          syncAutoScaleHebrew();
+          const enabled = (byId('auto_scale_hebrew') || {}).checked && !(byId('auto-scale-hebrew-row') || {}).hidden;
+          const scale = enabled && !_ccDocumentHebrewContext ? hebrewAutoScaleFactor(font) : 1;
+          sample.style.fontSize = scale > 1 ? (scale * 100) + '%' : '';
+        }
       }
     }
 
@@ -140,28 +182,15 @@
       updateStandardPreview(prefix + '_font', prefix + '_preview', prefix + '_font_style');
     }
 
-    // Fonts → Title shows one title's settings at a time: the translation
-    // title's or the source (Hebrew) title's.
-    function showTitleLanguage(language) {
-      document.querySelectorAll('[data-title-language]').forEach(function (tab) {
-        var selected = tab.getAttribute('data-title-language') === language;
-        tab.setAttribute('aria-selected', selected ? 'true' : 'false');
-        tab.classList.toggle('is-active', selected);
-        tab.tabIndex = selected ? 0 : -1;
-      });
-      document.querySelectorAll('[data-title-language-panel]').forEach(function (panel) {
-        panel.hidden = panel.getAttribute('data-title-language-panel') !== language;
-      });
-    }
-
     function updateTransliterationPreview() {
       const scheme = byId('transliteration_scheme');
       const preview = byId('transliteration_preview');
       if (!scheme || !preview) return;
       // Both operands are local constants: the <span> literal is static, and
-      // transliterationExamples is a hand-authored const lookup at the top of
-      // this file. No user input is interpolated.
-      preview.innerHTML = '<span class="label">Preview</span>' + (transliterationExamples[scheme.value] || transliterationExamples.simple_english);
+      // transliterationExampleText reads a const lookup at the top of this
+      // file (the engine's output, kept so by a test). No user input is
+      // interpolated.
+      preview.innerHTML = '<span class="label">Preview</span>' + transliterationExampleText(scheme.value);
       updateStandardPreview('transliteration_font', 'transliteration_preview', 'transliteration_font_style');
     }
 
@@ -229,10 +258,13 @@
         root: '#pref-tab-insertion',
         hideInapplicable: false,
         getState: function () {
+          var translitCheck = byId('include_transliteration_default');
           return {
             outputMode: byId('output_mode_default').value,
             layout: byId('bilingual_layout_default').value,
-            alignedRows: byId('bilingual_aligned_rows').value === 'true'
+            alignedRows: byId('bilingual_aligned_rows').value === 'true',
+            transliterationOn: translitCheck ? translitCheck.checked : false,
+            transliterationPosition: (byId('transliteration_position') || {}).value
           };
         },
         onSelectDisplay: function (mode) { setPrefButtonGroup('output_mode_default', mode); },
@@ -244,8 +276,26 @@
       });
     }
 
+    // The settings that once had a Fonts tab of their own sit beside what they
+    // style: the translation's language and the emphasis mapping in the card
+    // (data-cc-attach, placed here), and each font's full editor under its
+    // font button (data-font-editor, opened in place by the card: fontEditor).
+    function _attachCardExtras() {
+      var language = document.querySelector('[data-cc-attach="translationLanguage"]');
+      var translationRows = document.querySelector('#composition-card-container .cc-section--translation .cc-pill-row');
+      if (language && translationRows) translationRows.insertBefore(language, translationRows.firstChild);
+      var mapping = document.querySelector('[data-cc-attach="emphasisMapping"]');
+      var emphasisRow = byId('cc-emphasis-toggle') && byId('cc-emphasis-toggle').closest('.cc-row');
+      var notes = byId('cc-notes-toggle');
+      var notesRow = notes && notes.closest('.cc-row');
+      if (emphasisRow && notesRow) emphasisRow.after(notesRow);
+      var advancedAnchor = notesRow || emphasisRow;
+      if (mapping && advancedAnchor) advancedAnchor.after(mapping);
+    }
+
     // Preferences adapter for the shared composition card component.
     function _initPreferencesCompositionCard() {
+      _attachCardExtras();
       initCompositionCard({
         containerId: 'composition-card-container',
         getState: function () {
@@ -256,6 +306,8 @@
           var hebrewLinkCheck = byId('insert_hebrew_sefaria_link_default');
           var linesCheck = byId('show_line_markers_default');
           var detailsCheck = byId('include_translation_source_info');
+          var editionCheck = byId('sefaria_link_edition_label');
+          var hebrewEditionCheck = byId('hebrew_link_edition_label');
           var emphasisInput = byId('source_emphasis_mode');
           var hebrewPunctuation = byId('hebrew_punctuation');
           var translationPunctuation = byId('translation_punctuation');
@@ -266,17 +318,27 @@
             translationPunctuationOn: translationPunctuation ? translationPunctuation.value !== 'false' : true,
             transliterationOn: transliterationOn,
             scheme: transliterationOn ? (scheme || 'simple_english') : 'none',
+            translitPosition: ccNormalizeTranslitPosition((byId('transliteration_position') || {}).value),
             linkOn: linkCheck ? linkCheck.checked : false,
             hebrewLinkOn: hebrewLinkCheck ? hebrewLinkCheck.checked : false,
+            editionOn: editionCheck ? editionCheck.checked : true,
+            hebrewEditionOn: hebrewEditionCheck ? hebrewEditionCheck.checked : true,
             linesOn: linesCheck ? linesCheck.checked : false,
             detailsOn: detailsCheck ? detailsCheck.checked : false,
             emphasisMode: ccNormalizeEmphasisMode(emphasisInput ? emphasisInput.value : ''),
-            fonts: ccFontStateFrom(function (id) { return (byId(id) || {}).value; })
+            notesMode: ccNormalizeNotesMode((byId('source_notes_mode') || {}).value),
+            fonts: ccFontStateFrom(function (id) { const field = byId(id) || {}; return id === 'auto_scale_hebrew' ? field.checked : field.value; })
           };
         },
-        // The font buttons (text and title fonts) edit the Fonts tab's own
-        // fields, so the two always agree and Save stores them like any other
-        // change. `prefix` names the field: hebrew_font, source_title_font…
+        // Each font button opens that font's full editor in place: font,
+        // size, style, colours and preview (and, for a title, its linked
+        // style). Its fields are the form's own, so Save stores them.
+        fontEditor: function (role) {
+          return document.querySelector('[data-font-editor="' + role + '"]');
+        },
+        // Only the font panel calls this, and Preferences opens none; kept so
+        // a font without an editor here still writes the form's own field.
+        // `prefix` names the field: hebrew_font, source_title_font…
         onFontChange: function (prefix, field, value) {
           var el = byId(prefix + (field === 'size' ? '_font_size' : '_font'));
           if (!el) return;
@@ -284,17 +346,6 @@
           else el.value = value;
           syncCustomSelect(el);
           el.dispatchEvent(new Event('change', { bubbles: true }));
-        },
-        onMoreFontSettings: function (role) {
-          var tab = byId('pref-tab-fonts-btn');
-          if (tab) tab.click();
-          var isTitle = role === 'hebrewTitle' || role === 'translationTitle';
-          if (isTitle) showTitleLanguage(role === 'hebrewTitle' ? 'source' : 'translation');
-          var section = byId(isTitle ? 'title-typography' : 'hebrew-text-settings');
-          if (section) {
-            section.open = true;
-            section.scrollIntoView({ block: 'start' });
-          }
         },
         onToggle: function (key) {
           if (key === 'hebrewPunctuation' || key === 'translationPunctuation') {
@@ -306,6 +357,9 @@
           } else if (key === 'link' || key === 'hebrewLink') {
             var linkBox = byId(key === 'link' ? 'insert_sefaria_link_default' : 'insert_hebrew_sefaria_link_default');
             if (linkBox) linkBox.checked = !linkBox.checked;
+          } else if (key === 'edition' || key === 'hebrewEdition') {
+            var editionBox = byId(key === 'edition' ? 'sefaria_link_edition_label' : 'hebrew_link_edition_label');
+            if (editionBox) editionBox.checked = !editionBox.checked;
           } else if (key === 'lines') {
             var linesBox = byId('show_line_markers_default');
             if (linesBox) linesBox.checked = !linesBox.checked;
@@ -318,6 +372,10 @@
           if (key === 'vowels') _prefSetCompositionPair(ccVowelsPrefs(value));
           else if (key === 'cantillation') _prefSetCompositionPair(ccCantillationPrefs(value));
           else if (key === 'emphasis') setPrefButtonGroup('source_emphasis_mode', ccNormalizeEmphasisMode(value));
+          else if (key === 'notes') setPrefButtonGroup('source_notes_mode', ccNormalizeNotesMode(value));
+          else if (key === 'translitPosition' && byId('transliteration_position')) {
+            byId('transliteration_position').value = ccNormalizeTranslitPosition(value);
+          }
         },
         onSchemeSelect: function (value) {
           _prefSetCompositionTransliteration(value);
@@ -325,6 +383,7 @@
         },
         getTranslitLabel: function (on, scheme) {
           if (!on) return 'Transliteration off';
+          // The card shows it through ccTranslitSample, which writes the maqaf.
           return transliterationExamples[scheme] || transliterationExamples.simple_english;
         },
         afterUpdate: function () {
@@ -382,6 +441,10 @@
         if (custom) custom.value = value;
       }
       toggleCustomReplacementField(selectId);
+      // The native select is hidden; the label shown is the custom dropdown's.
+      // Without this it kept the page's default (G-d, יי) after a reopen, over a
+      // saved custom value or another preset (BUG-013).
+      syncCustomSelect(select);
     }
 
     function toggleCustomReplacementField(selectId) {
@@ -424,20 +487,34 @@
       if (!grid) return;
       // Clear: constant empty string; equivalent to replaceChildren().
       grid.innerHTML = '';
-      overrideChars.forEach(function(ch) {
+      const buttons = overrideChars.map(function(ch) { return { ch: ch, name: '' }; }).concat(overrideMarks);
+      buttons.forEach(function(item) {
+        const ch = item.ch;
         const btn = document.createElement('button');
         btn.type = 'button';
-        btn.className = 'override-char-btn' + (selectedOverrideChar === ch ? ' active' : '');
-        btn.textContent = ch;
+        btn.className = 'override-char-btn' + (item.name ? ' override-mark-btn' : '') + (selectedOverrideChar === ch ? ' active' : '');
+        btn.textContent = overrideLabel(ch);
         btn.setAttribute('data-char', ch);
+        if (item.name) {
+          btn.title = item.name;
+          btn.setAttribute('aria-label', item.name);
+        }
         btn.addEventListener('click', function() {
           selectedOverrideChar = ch;
-          byId('override_selected_char').value = ch;
+          byId('override_selected_char').value = item.name ? overrideLabel(ch) + ' ' + item.name : ch;
           byId('override_value').value = transliterationOverrides[ch] || '';
           renderOverrideGrid();
         });
         grid.appendChild(btn);
       });
+    }
+
+    // "Double dagesh chazak": a switch with no name, driving the hidden
+    // transliteration_biblical_dagesh_mode field ("forte" or "none").
+    function syncDageshSwitchFromField() {
+      const field = byId('transliteration_biblical_dagesh_mode');
+      const toggle = byId('transliteration_double_dagesh');
+      if (field && toggle) toggle.checked = field.value === 'forte' || field.value === 'all';
     }
 
     function escapeHtml(value) {
@@ -461,7 +538,7 @@
       // Every user-sourced value is passed through `escapeHtml`. If you
       // change this builder, keep every interpolation escaped.
       list.innerHTML = keys.map(function(k) {
-        return '<div class="override-item"><span><strong>' + escapeHtml(k) + '</strong> → ' + escapeHtml(transliterationOverrides[k]) + '</span></div>';
+        return '<div class="override-item"><span><strong>' + escapeHtml(overrideLabel(k)) + '</strong> → ' + escapeHtml(transliterationOverrides[k]) + '</span></div>';
       }).join('');
     }
 
@@ -641,6 +718,7 @@
     function applyPreferencesToForm(preferences) {
       try {
               document.querySelectorAll('input[type="checkbox"]').forEach(function(el) {
+                if (el.closest && el.closest('#settings-transfer-modal')) return;
                 el.checked = preferences[el.name] == 'true' || preferences[el.name] === true;
               });
 
@@ -690,6 +768,7 @@
                 setPrefButtonGroup(groupId, val);
               });
               setPrefButtonGroup('source_emphasis_mode', ccNormalizeEmphasisMode(preferences.source_emphasis_mode));
+              setPrefButtonGroup('source_notes_mode', ccNormalizeNotesMode(preferences.source_notes_mode));
 
               setPrefTranslitDropdown(preferences.voices_translit_default || 'none');
 
@@ -707,7 +786,7 @@
                   const el = byId(id);
                   if (!el) return;
                   if (preferences[id] !== undefined && preferences[id] !== null && preferences[id] !== '') {
-                    if (customReplacementFields.indexOf(id) === -1) el.value = preferences[id];
+                    el.value = preferences[id];
                   }
                   syncCustomSelect(el);
                 });
@@ -730,12 +809,17 @@
               updateSheimotSummary();
               renderOverrideGrid();
               renderOverrideList();
+              syncDageshSwitchFromField();
               loadCorpusOrderFromFields();
+              voicesTopicOrderEditor.load();
+              dictionaryOrderEditor.load();
               loadLanguageTypographyFromField();
               loadTranslationLanguagesFromField();
               syncExperimentalChildToggles();
               syncLinkerInsertToggle();
+              loadSidebarControlsFromFields_();
               loadMenuLayoutEditor(preferences.menu_layout);
+              markFormClean_();
       } catch (error) {
         console.error('Preferences modal apply failed:', error);
         setResultsMessage('Preferences loaded with an error: ' + (error && error.message ? error.message : error));
@@ -773,13 +857,16 @@
     }
 
     function loadPreferencesIntoForm() {
-      google.script.run.withSuccessHandler(function(preferences) {
-        applyPreferencesToForm(preferences || {});
+      google.script.run.withSuccessHandler(function(result) {
+        adoptDocumentProfile_(result);
+        editingDocument_ = !!documentProfile_.key;
+        applyPreferencesToForm(result.preferences || {});
+        renderSettingsProfiles_();
       }).withFailureHandler(function(error) {
         console.error('Preferences modal failed to load:', error);
         setResultsMessage('Could not load preferences.');
         $(".hide").fadeOut(300);
-      }).getPreferences();
+      }).getDocumentPreferenceProfile();
     }
 
     document.addEventListener('click', function() {
@@ -800,9 +887,6 @@
       var box = byId(fields.getAttribute('data-link-override'));
       if (box) box.addEventListener('change', syncLinkOverrideFields);
     });
-    document.querySelectorAll('[data-title-language]').forEach(function (tab) {
-      tab.addEventListener('click', function () { showTitleLanguage(tab.getAttribute('data-title-language')); });
-    });
     // Emphasis mapping has no live preview element; bindStyleControl tolerates
     // a missing previewId and just keeps the button state in sync.
     bindStyleControl('emphasis_bold_style', null);
@@ -822,7 +906,6 @@
       'select#hebrew_link_font',
       'select#citation_font',
       'select#source_title_heading',
-      'select#transliteration_scheme',
       'select#preferred_translation_language',
       'select#meforash_replacement',
       'select#yaw_replacement',
@@ -849,13 +932,17 @@
     }
 
     byId('transliteration_font').addEventListener('change', function(){ updateTransliterationPreview(); updateCompositionCard(); });
-    byId('transliteration_scheme').addEventListener('change', function(){ syncCustomSelect(byId('transliteration_scheme')); updateTransliterationPreview(); updateCompositionCard(); });
     if (byId('include_transliteration_default')) byId('include_transliteration_default').addEventListener('change', function(){ updateCompositionCard(); });
     if (byId('insert_sefaria_link_default')) byId('insert_sefaria_link_default').addEventListener('change', function(){ updateCompositionCard(); });
     if (byId('insert_hebrew_sefaria_link_default')) byId('insert_hebrew_sefaria_link_default').addEventListener('change', function(){ updateCompositionCard(); });
     if (byId('show_line_markers_default')) byId('show_line_markers_default').addEventListener('change', function(){ updateCompositionCard(); });
     if (byId('include_translation_source_info')) byId('include_translation_source_info').addEventListener('change', function(){ updateCompositionCard(); });
     // insert_citation_default removed — citation feature was dropped.
+
+    byId('auto_scale_hebrew').addEventListener('change', function () {
+      updateStandardPreview('hebrew_font', 'hebrew_font_preview', 'hebrew_font_style');
+      updateCompositionCard();
+    });
 
     FONT_SIZE_FIELDS.forEach(function(id) {
       const el = byId(id);
@@ -884,6 +971,10 @@
     });
 
 
+    byId('transliteration_double_dagesh').addEventListener('change', function() {
+      byId('transliteration_biblical_dagesh_mode').value = this.checked ? 'forte' : 'none';
+    });
+
     byId('save_override_btn').addEventListener('click', function() {
       if (!selectedOverrideChar) return;
       const val = byId('override_value').value;
@@ -901,100 +992,148 @@
       renderOverrideGrid();
     });
 
-    document.querySelector('.reset-preferences-button').addEventListener('click', function() {
-      byId('reset_modal').hidden = false;
-    });
-
-    document.querySelector('.reset-cancel-button').addEventListener('click', function() {
-      byId('reset_modal').hidden = true;
-    });
-
-    // Tells an open sidebar the stored preferences changed: it re-reads them
-    // on the storage event (reloadAccountPreferences in sidebar/js/
-    // preferences-state). Storage can be unavailable; the sidebar then
-    // re-reads them on its next use after opening this dialog.
+    // An open sidebar reloads account defaults through this storage event.
     function markPreferencesSaved() {
       try { localStorage.setItem('sefariaPreferencesSavedAt', String(Date.now())); } catch (e) {}
     }
 
-    // Every save covers the dialog with the busy overlay (shared/ui/busy-overlay)
-    // until the server answers; the result line then says how it went.
-    document.querySelector('.reset-confirm-button').addEventListener('click', function() {
-      byId('reset_modal').hidden = true;
-      setResultsMessage('');
-      modalBusyShow('Resetting to defaults…');
-      google.script.run.withSuccessHandler(function(defaults) {
-        google.script.run.withSuccessHandler(function() {
-          markPreferencesSaved();
-          modalBusyHide();
-          applyPreferencesToForm(defaults);
-          setResultsMessage('Preferences reset to defaults.');
-        }).withFailureHandler(function(error) {
-          console.error('Preferences reset failed:', error);
-          modalBusyHide();
-          setResultsMessage('Could not reset preferences.');
-        }).setPreferences(defaults);
-      }).withFailureHandler(function(error) {
-        console.error('Preferences reset failed:', error);
-        modalBusyHide();
-        setResultsMessage('Could not reset preferences.');
-      }).getDefaultPreferences();
+    // Only the open sidebar for this document/tab can acknowledge this request.
+    // Clear the storage value immediately so opening a sidebar later cannot
+    // apply an old form or inherit another document's settings.
+    var pendingSidebarPreferences = null;
+    $('.apply-sidebar-preferences-button').on('click', function () {
+      if (pendingSidebarPreferences || preferencesBaseline_ === null) return;
+      var channel = sidebarPreferenceChannel();
+      var $button = $(this);
+      if (!channel) { setResultsMessage('Open the sidebar and preview a source to apply settings here.'); return; }
+      var form = collectPreferenceObject();
+      var values = {};
+      (getAppConfig().sidebarPreferenceKeys || []).forEach(function (key) {
+        if (Object.prototype.hasOwnProperty.call(form, key)) values[key] = form[key];
+      });
+      var id = String(Date.now()) + ':' + Math.random();
+      function finish(message) {
+        clearTimeout(pendingSidebarPreferences.timer);
+        pendingSidebarPreferences = null;
+        $button.prop('disabled', false);
+        setResultsMessage(message);
+      }
+      $button.prop('disabled', true);
+      setResultsMessage('Sending insertion settings to the sidebar…');
+      pendingSidebarPreferences = { id: id, finish: finish, timer: setTimeout(function () {
+        finish('No sidebar preview confirmed the change. Open the sidebar, preview a source, then try again.');
+      }, 12000) };
+      try {
+        localStorage.setItem(channel, JSON.stringify({ id: id, profile: activeProfile_().id, values: values }));
+        localStorage.removeItem(channel);
+      } catch (error) {
+        finish('The sidebar could not be reached from Preferences.');
+      }
     });
 
-    $('.refresh-sidebar-button').on('click', function() {
-      setResultsMessage('');
-      modalBusyShow('Refreshing the sidebar…');
-      google.script.run.withSuccessHandler(function() {
-        modalBusyHide();
-        setResultsMessage('Sidebar refreshed. Sidebar-only session items were cleared.');
-      }).withFailureHandler(function(error) {
-        console.error('Sidebar refresh failed:', error);
-        modalBusyHide();
-        setResultsMessage('Could not refresh the sidebar.');
-      }).refreshSidebarAfterPreferences();
+    window.addEventListener('storage', function (event) {
+      var channel = sidebarPreferenceChannel();
+      if (!pendingSidebarPreferences || !channel || event.key !== channel + ':ack' || !event.newValue) return;
+      var answer;
+      try { answer = JSON.parse(event.newValue); } catch (error) { return; }
+      if (!answer || answer.id !== pendingSidebarPreferences.id) return;
+      pendingSidebarPreferences.finish(answer.message);
     });
 
-    $(".save-preferences-button").click(function() {
-      setResultsMessage('');
-      modalBusyShow('Saving preferences…');
-      const preferenceObject = collectPreferenceObject();
-      google.script.run.withSuccessHandler(function() {
-        markPreferencesSaved();
-        google.script.run.withSuccessHandler(function() {
-          modalBusyHide();
-          setResultsMessage('Successfully updated preferences.');
-          updateSheimotSummary();
-        }).withFailureHandler(function(error) {
-          console.error('Menu refresh failed:', error);
-          modalBusyHide();
-          setResultsMessage('Preferences saved, but menu refresh failed. Close and reopen the document to see menu changes.');
-        }).buildAndInstallMenu();
-      }).withFailureHandler(function(error) {
-        console.error('Preferences save failed:', error);
-        modalBusyHide();
-        setResultsMessage('Could not save preferences.');
-      }).setPreferences(preferenceObject);
+    var preferencesClosing_ = false;
+
+    function closePreferences_(afterSave) {
+      preferencesClosing_ = true;
+      if (!afterSave) { google.script.host.close(); return; }
+      $('.save-actions button').prop('disabled', true);
+      $('.preferences-shell').prop('inert', true);
+      setTimeout(function () { google.script.host.close(); }, 1800);
+    }
+
+    function requestPreferencesClose_() {
+      if (preferencesClosing_ || !byId('profile_modal').hidden || document.querySelector('#modal-busy:not([hidden])')) return;
+      withUnsavedChangesHandled_('Close Preferences?', closePreferences_, {
+        label: 'Save & Close',
+        onSave: function () { closePreferences_(true); }
+      });
+    }
+
+    byId('preferences-dismiss').addEventListener('click', requestPreferencesClose_);
+    document.addEventListener('keydown', function (event) {
+      if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing ||
+          document.querySelector('#settings-transfer-modal[open]')) return;
+      event.preventDefault();
+      if (!byId('profile_modal').hidden) byId('profile_modal_cancel').click();
+      else if (document.querySelector('.custom-select.open')) document.body.click();
+      else requestPreferencesClose_();
     });
 
-    $(".save-close-preferences-button").click(function() {
-      setResultsMessage('');
-      modalBusyShow('Saving preferences…');
-      const preferenceObject = collectPreferenceObject();
-      // On success the overlay stays up until the dialog closes.
-      google.script.run.withSuccessHandler(function() {
-        markPreferencesSaved();
-        google.script.run.withSuccessHandler(function() {
-          updateSheimotSummary();
-          google.script.host.close();
-        }).withFailureHandler(function(error) {
-          console.error('Menu refresh failed:', error);
-          google.script.host.close();
-        }).buildAndInstallMenu();
-      }).withFailureHandler(function(error) {
-        console.error('Preferences save-and-close failed:', error);
-        modalBusyHide();
-        setResultsMessage('Could not save preferences.');
-      }).setPreferences(preferenceObject);
+    // The parent Docs window owns its title-bar close button. Ask the
+    // browser to warn if it delivers a navigation event to this frame.
+    window.addEventListener('beforeunload', function (event) {
+      if (preferencesClosing_ || !formHasUnsavedChanges_()) return;
+      event.preventDefault();
+      event.returnValue = true;
+    });
+
+    $('.close-preferences-button').on('click', function () {
+      if (preferencesClosing_ || preferencesBaseline_ === null) return;
+      if (!formHasUnsavedChanges_()) { closePreferences_(); return; }
+      saveFormThen_(function () { closePreferences_(true); });
+    });
+    $('.save-preferences-button').on('click', function () { saveFormThen_(); });
+
+    function cloneAccountSettings_() {
+      askProfileQuestion_({
+        title: 'Clone Account Settings?',
+        message: 'This copies the saved User Profile and shared account settings into This Document. It replaces saved settings for this document and discards unsaved edits in this window.',
+        ok: 'Clone Account Settings',
+        onOk: function () {
+          modalBusyShow('Cloning account settings…');
+          google.script.run.withSuccessHandler(function (result) {
+            modalBusyHide();
+            adoptDocumentProfile_(result);
+            applyPreferencesToForm(result.preferences);
+            renderSettingsProfiles_();
+            markPreferencesSaved();
+            setResultsMessage('Copied User Profile settings to This Document.');
+          }).withFailureHandler(function (error) {
+            modalBusyHide();
+            setResultsMessage((error && error.message) || 'Could not clone account settings.');
+          }).cloneAccountSettingsForDocument(documentProfile_.key);
+        }
+      });
+    }
+
+    $('.pref-preset-button').on('click', function () {
+      var preset = $(this).attr('data-preset');
+      if (preset === 'document') { cloneAccountSettings_(); return; }
+      var factory = preset === 'factory';
+      var name = activeProfile_().name;
+      askProfileQuestion_({
+        title: factory ? 'Restore Factory preset?' : 'Reset ' + quoted_(name) + '?',
+        message: factory
+          ? 'This resets ' + quoted_(name) + ' and the shared account settings, and switches to Simple. Saved document overrides and other named profiles are kept. Unsaved edits in this window will be discarded.'
+          : 'This restores the add-on defaults for text, layout and appearance in this profile. Unsaved edits in this window will be discarded.',
+        ok: factory ? 'Restore Factory preset' : 'Reset profile',
+        danger: factory,
+        onOk: function () {
+          var profile = activeProfile_().id;
+          modalBusyShow('Restoring defaults…');
+          google.script.run.withSuccessHandler(function (result) {
+            modalBusyHide();
+            setInterfaceModeUi_(result.uiMode);
+            announceUiModeToSidebar_(result.uiMode);
+            try { google.script.host.setWidth(result.uiMode === 'full' ? 860 : 600); } catch (e) {}
+            applyPreferencesToForm(editingDocument_ ? result.documentPreferences : result.preferences);
+            markPreferencesSaved();
+            setResultsMessage(factory ? 'Factory preset applied to ' + quoted_(name) + ' and shared account settings.' : 'Active profile reset to add-on defaults.');
+          }).withFailureHandler(function (error) {
+            modalBusyHide();
+            setResultsMessage((error && error.message) || 'Could not restore defaults.');
+          }).restorePreferencePreset(preset, profile);
+        }
+      });
     });
 
     // ── Text-search corpus order (Search tab) ───────────────────────────────
@@ -1177,7 +1316,212 @@
       renderCorpusOrderList();
     }
 
-    // ── Per-language translation formatting (Fonts → Translation → Advanced) ─
+    // ── Lexicon dictionary order (Search tab) ───────────────────────────────
+    // The corpus list's counterpart for the Lexicon's dictionaries, in the
+    // same rows: lexicon_dictionary_order / lexicon_dictionary_excluded, kept
+    // in two hidden inputs so collectPreferenceObject() saves them. The
+    // catalog and normalizers are in shared/ui/state.
+
+    function createOrderVisibilityEditor(config) {
+      let order = config.normalizeOrder('[]');
+      let excluded = [];
+      let draggedKey = null;
+
+      function labelOf(key) {
+        const entry = config.catalog.find(function(item) { return item.key === key; });
+        return entry || { label: key, note: '' };
+      }
+
+      function sync() {
+        byId(config.orderInput).value = JSON.stringify(order);
+        byId(config.excludedInput).value = JSON.stringify(excluded);
+      }
+
+      function moveTo(key, targetIndex) {
+        const from = order.indexOf(key);
+        if (from < 0) return;
+        targetIndex = Math.max(0, Math.min(order.length - 1, targetIndex));
+        if (from === targetIndex) return;
+        order.splice(from, 1);
+        order.splice(targetIndex, 0, key);
+        sync();
+        render();
+      }
+
+      function toggleExcluded(key) {
+        const index = excluded.indexOf(key);
+        if (index >= 0) excluded.splice(index, 1);
+        else excluded.push(key);
+        sync();
+        render();
+      }
+
+      function button(action, text, label, disabled) {
+        const element = document.createElement('button');
+        element.type = 'button';
+        element.className = 'corpus-order-button corpus-order-button--' + action;
+        element.setAttribute('data-order-action', action);
+        element.setAttribute('aria-label', label);
+        element.title = label;
+        element.textContent = text;
+        element.disabled = !!disabled;
+        return element;
+      }
+
+      function render() {
+        const list = byId(config.list);
+        if (!list) return;
+        list.replaceChildren();
+        order.forEach(function(key, index) {
+          const entry = labelOf(key);
+          const isHidden = excluded.indexOf(key) >= 0;
+          const row = document.createElement('li');
+          row.className = 'corpus-order-row' + (isHidden ? ' is-excluded' : '');
+          row.setAttribute('data-order-key', key);
+          row.draggable = true;
+          row.tabIndex = -1;
+
+          const handle = document.createElement('span');
+          handle.className = 'corpus-order-handle';
+          handle.setAttribute('aria-hidden', 'true');
+          handle.textContent = '⠿';
+
+          const position = document.createElement('span');
+          position.className = 'corpus-order-position';
+          position.textContent = String(index + 1);
+
+          const text = document.createElement('span');
+          text.className = 'corpus-order-label';
+          text.textContent = entry.label;
+          if (entry.note) {
+            const note = document.createElement('span');
+            note.className = 'corpus-order-note';
+            note.textContent = entry.note;
+            text.appendChild(note);
+          }
+
+          const actions = document.createElement('span');
+          actions.className = 'corpus-order-actions';
+          actions.appendChild(button('up', '↑', 'Move ' + entry.label + ' up', index === 0));
+          actions.appendChild(button('down', '↓', 'Move ' + entry.label + ' down', index === order.length - 1));
+          const visibility = button('visibility', isHidden ? 'Hidden' : 'Shown', (isHidden ? 'Show ' : 'Hide ') + entry.label + ' ' + config.where, false);
+          visibility.setAttribute('aria-pressed', isHidden ? 'false' : 'true');
+          actions.appendChild(visibility);
+
+          row.appendChild(handle);
+          row.appendChild(position);
+          row.appendChild(text);
+          row.appendChild(actions);
+          list.appendChild(row);
+        });
+      }
+
+      function focusControl(key, action) {
+        const row = Array.prototype.find.call(byId(config.list).children, function(li) { return li.getAttribute('data-order-key') === key; });
+        if (!row) return;
+        const control = row.querySelector('[data-order-action="' + action + '"]');
+        if (control && !control.disabled) control.focus();
+        else row.focus();
+      }
+
+      function init() {
+        const list = byId(config.list);
+        if (!list) return;
+        list.addEventListener('click', function(event) {
+          const control = event.target.closest('[data-order-action]');
+          const row = control && control.closest('[data-order-key]');
+          if (!row) return;
+          const key = row.getAttribute('data-order-key');
+          const action = control.getAttribute('data-order-action');
+          if (action === 'up') moveTo(key, order.indexOf(key) - 1);
+          else if (action === 'down') moveTo(key, order.indexOf(key) + 1);
+          else if (action === 'visibility') toggleExcluded(key);
+          focusControl(key, action);
+        });
+        list.addEventListener('dragstart', function(event) {
+          const row = event.target.closest('[data-order-key]');
+          if (!row) return;
+          draggedKey = row.getAttribute('data-order-key');
+          row.classList.add('is-dragging');
+          if (event.dataTransfer) {
+            event.dataTransfer.effectAllowed = 'move';
+            event.dataTransfer.setData('text/plain', draggedKey);
+          }
+        });
+        list.addEventListener('dragover', function(event) {
+          if (!draggedKey) return;
+          const row = event.target.closest('[data-order-key]');
+          if (!row) return;
+          event.preventDefault();
+          const rect = row.getBoundingClientRect();
+          const after = event.clientY > rect.top + rect.height / 2;
+          list.querySelectorAll('.drop-before, .drop-after').forEach(function(el) {
+            el.classList.remove('drop-before', 'drop-after');
+          });
+          row.classList.add(after ? 'drop-after' : 'drop-before');
+        });
+        list.addEventListener('drop', function(event) {
+          if (!draggedKey) return;
+          const row = event.target.closest('[data-order-key]');
+          event.preventDefault();
+          if (!row) return;
+          const targetKey = row.getAttribute('data-order-key');
+          const after = row.classList.contains('drop-after');
+          const key = draggedKey;
+          if (targetKey === key) return;
+          const remaining = order.filter(function(k) { return k !== key; });
+          moveTo(key, remaining.indexOf(targetKey) + (after ? 1 : 0));
+        });
+        list.addEventListener('dragend', function() {
+          draggedKey = null;
+          list.querySelectorAll('.is-dragging, .drop-before, .drop-after').forEach(function(el) {
+            el.classList.remove('is-dragging', 'drop-before', 'drop-after');
+          });
+        });
+        byId(config.reset).addEventListener('click', function() {
+          order = config.normalizeOrder('[]');
+          excluded = [];
+          sync();
+          render();
+        });
+        render();
+      }
+
+      return {
+        init: init,
+        // The stored values, from the hidden inputs (after the form is filled).
+        load: function() {
+          order = config.normalizeOrder(byId(config.orderInput).value);
+          excluded = config.normalizeExcluded(byId(config.excludedInput).value);
+          sync();
+          render();
+        }
+      };
+    }
+
+    const dictionaryOrderEditor = createOrderVisibilityEditor({
+      list: 'lexicon-dictionary-order-list',
+      orderInput: 'lexicon_dictionary_order',
+      excludedInput: 'lexicon_dictionary_excluded',
+      reset: 'lexicon-dictionary-order-reset',
+      catalog: LEXICON_DICTIONARY_CATALOG,
+      normalizeOrder: normalizeLexiconDictionaryOrder,
+      normalizeExcluded: normalizeLexiconDictionaryExcluded,
+      where: 'in the Lexicon'
+    });
+
+    const voicesTopicOrderEditor = createOrderVisibilityEditor({
+      list: 'voices-topic-order-list',
+      orderInput: 'voices_topic_order',
+      excludedInput: 'voices_topic_excluded',
+      reset: 'voices-topic-order-reset',
+      catalog: VOICES_TOPIC_CATALOG,
+      normalizeOrder: normalizeVoicesTopicOrder,
+      normalizeExcluded: normalizeVoicesTopicExcluded,
+      where: 'in Voices'
+    });
+
+    // ── Per-language translation formatting (translation Text font → Advanced) ─
     // The entries live in one hidden input (translation_language_typography),
     // as JSON {code: {font, size, style}}, so collectPreferenceObject() saves
     // them like any other field. A blank font or size means "as the Translation
@@ -1469,8 +1813,6 @@
         selector.querySelectorAll('button[data-value]').forEach(function(btn) {
           btn.addEventListener('click', function() {
             setPrefButtonGroup(groupId, btn.getAttribute('data-value'));
-            // The Texts tab's B&I pill shows the same setting.
-            if (groupId === 'source_emphasis_mode') updateCompositionCard();
           });
         });
       });
@@ -1481,7 +1823,8 @@
     var PREF_TRANSLIT_LABELS = {
       none: 'None', simple_english: 'Simple English', traditional: 'Traditional',
       modern_israeli: 'Modern Israeli', ashkenazi: 'Ashkenazi',
-      academic_full: 'Academic (Full)', ipa_modern: 'IPA (Modern Israeli)',
+      academic_full: 'Academic (Full)', ala_lc: 'ALA-LC (Library of Congress)',
+      bgn_pcgn: 'BGN/PCGN 2018 (Hebrew Academy)', ipa_modern: 'IPA (Modern Israeli)',
       ipa_tiberian: 'IPA (Tiberian-ish)'
     };
 
@@ -1544,25 +1887,34 @@
         });
       }
 
-      tabs.forEach(function(tab, idx) {
+      // A sidebar tab switched off hides its sub-tab (Sidebar tabs, at the
+      // top); the arrow keys skip it.
+      function go(tab) {
+        tab.click();
+        tab.focus();
+      }
+
+      tabs.forEach(function(tab) {
         tab.addEventListener('click', function() { activateWorkflow(tab); });
         tab.addEventListener('keydown', function(ev) {
+          var shown = tabs.filter(function (t) { return window.getComputedStyle(t).display !== 'none'; });
+          var at = Math.max(0, shown.indexOf(tab));
           switch (ev.key) {
             case 'ArrowRight':
               ev.preventDefault();
-              tabs[(idx + 1) % tabs.length].click();
+              go(shown[(at + 1) % shown.length]);
               break;
             case 'ArrowLeft':
               ev.preventDefault();
-              tabs[(idx - 1 + tabs.length) % tabs.length].click();
+              go(shown[(at - 1 + shown.length) % shown.length]);
               break;
             case 'Home':
               ev.preventDefault();
-              tabs[0].click();
+              go(shown[0]);
               break;
             case 'End':
               ev.preventDefault();
-              tabs[tabs.length - 1].click();
+              go(shown[shown.length - 1]);
               break;
           }
         });
@@ -1632,6 +1984,12 @@
     // tab) is on, so the editor leaves it out otherwise. It keeps its place in
     // the layout, ready for when the feature is switched back on.
     function menuLayoutIsSuppressed(id) {
+      // Disabled optional tools are unavailable in either interface; retain
+      // their stored order and explicit Menu Bar visibility for re-enabling.
+      if (id === 'voices' || id === 'lexicon') {
+        var tool = byId('show_' + id + '_tab');
+        return !!tool && !tool.checked;
+      }
       if (id !== 'surprise_me') return false;
       var toggle = byId('surprise_me_enabled');
       return !(toggle && toggle.checked && !toggle.disabled);
@@ -1649,13 +2007,14 @@
     function menuLayoutLabel(id) {
       if (id === MENU_DIVIDER) return 'Divider';
       if (id === MENU_SUBMENU_ID) return menuEditorConfig.submenuLabel + ' ▸';
+      if (id === 'texts' && menuLayoutIsSuppressed('voices') && menuLayoutIsSuppressed('lexicon')) return 'Add Sources with Sefaria';
       return menuEditorConfig.items[id].label;
     }
 
-    function menuLayoutButton(text, title, action, disabled) {
+    function menuLayoutButton(text, title, action, disabled, extraClass) {
       var btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = 'menu-layout-btn';
+      btn.className = 'menu-layout-btn' + (extraClass ? ' ' + extraClass : '');
       btn.textContent = text;
       btn.title = title;
       btn.setAttribute('aria-label', title);
@@ -1717,9 +2076,11 @@
         if (id === MENU_DIVIDER) {
           actions.appendChild(menuLayoutButton('✕', 'Remove divider', 'remove'));
         } else if (id !== MENU_SUBMENU_ID) {
+          // Says where it goes: an arrow alone beside ↑ and ↓ read as one more
+          // way to reorder, and the move between the lists went unnoticed.
           actions.appendChild(listName === 'top'
-            ? menuLayoutButton('→', 'Move ' + name + ' into ' + menuEditorConfig.submenuLabel, 'move')
-            : menuLayoutButton('←', 'Move ' + name + ' to the main menu', 'move'));
+            ? menuLayoutButton('Move to ' + menuEditorConfig.submenuLabel + ' ▸', 'Move ' + name + ' into the ' + menuEditorConfig.submenuLabel + ' submenu', 'move', false, 'menu-layout-btn--move')
+            : menuLayoutButton('◂ Move to main menu', 'Move ' + name + ' out of ' + menuEditorConfig.submenuLabel + ', to the main menu', 'move', false, 'menu-layout-btn--move'));
         }
         li.appendChild(actions);
         listEl.appendChild(li);
@@ -1735,22 +2096,62 @@
       }
     }
 
+    function menuLayoutFieldValue(layout) {
+      return menuLayoutIsDefault(layout) ? '' : JSON.stringify(layout);
+    }
+
     function renderMenuLayoutEditor(focus) {
       renderMenuLayoutList('top', focus);
       renderMenuLayoutList('quick_actions', focus);
       var field = byId('menu_layout');
-      if (field) field.value = menuLayoutIsDefault(menuLayoutState) ? '' : JSON.stringify(menuLayoutState);
+      if (field) field.value = menuLayoutFieldValue(menuLayoutState);
     }
 
-    function loadMenuLayoutEditor(storedLayout) {
+    // The menu as stored (the menu_layout field's value for it), so a change
+    // of interface mode, which moves the stored menu, can tell whether the
+    // editor holds changes not yet saved and keep them instead of redrawing.
+    var menuLayoutSavedValue = null;
+
+    function menuLayoutHasUnsavedChanges() {
+      var field = byId('menu_layout');
+      return menuLayoutSavedValue !== null && !!field && field.value !== menuLayoutSavedValue;
+    }
+
+    function markMenuLayoutSaved(storedLayout) {
+      if (!menuEditorConfig) return;
+      menuLayoutSavedValue = menuLayoutFieldValue(menuLayoutNormalize(storedLayout));
+    }
+
+    // opts.edit: the user's own change ("Restore default menu"), not yet saved.
+    function loadMenuLayoutEditor(storedLayout, opts) {
       if (!menuEditorConfig) return;
       menuLayoutState = menuLayoutNormalize(storedLayout);
       renderMenuLayoutEditor();
+      if (!(opts && opts.edit)) markMenuLayoutSaved(storedLayout);
+    }
+
+    // Move an item between the menu and the Quick Actions submenu, and say
+    // where it went. Into the submenu: at its end, and the submenu is put
+    // back in the menu (and shown) if it was empty or hidden, so the item
+    // never vanishes. Out of it: just below the Quick Actions entry, where it
+    // came from, not at the bottom of the menu.
+    function menuLayoutMove(state, listName, index) {
+      var otherName = listName === 'top' ? 'quick_actions' : 'top';
+      var moved = state[listName].splice(index, 1)[0];
+      if (otherName === 'quick_actions') {
+        state.quick_actions.push(moved);
+        if (state.top.indexOf(MENU_SUBMENU_ID) === -1) state.top.push(MENU_SUBMENU_ID);
+        var hiddenAt = state.hidden.indexOf(MENU_SUBMENU_ID);
+        if (hiddenAt !== -1) state.hidden.splice(hiddenAt, 1);
+      } else {
+        var submenuAt = state.top.indexOf(MENU_SUBMENU_ID);
+        state.top.splice(submenuAt === -1 ? state.top.length : submenuAt + 1, 0, moved);
+      }
+      return { list: otherName, index: state[otherName].indexOf(moved) };
     }
 
     function handleMenuLayoutAction(listName, index, action) {
       var list = menuLayoutState[listName];
-      var otherName = listName === 'top' ? 'quick_actions' : 'top';
       var focus = { list: listName, index: index, action: action };
       var step = action === 'up' ? -1 : action === 'down' ? 1 : 0;
       var target = step ? menuLayoutVisibleNeighbour(list, index, step) : -1;
@@ -1761,13 +2162,8 @@
         list.splice(index, 1);
         focus.index = Math.min(index, list.length - 1);
       } else if (action === 'move') {
-        var moved = list.splice(index, 1)[0];
-        menuLayoutState[otherName].push(moved);
-        // Moving into an empty submenu must also put the submenu back in the menu.
-        if (otherName === 'quick_actions' && menuLayoutState.top.indexOf(MENU_SUBMENU_ID) === -1) {
-          menuLayoutState.top.push(MENU_SUBMENU_ID);
-        }
-        focus = { list: otherName, index: menuLayoutState[otherName].indexOf(moved), action: 'move' };
+        focus = menuLayoutMove(menuLayoutState, listName, index);
+        focus.action = 'move';
       }
       renderMenuLayoutEditor(focus);
     }
@@ -1807,17 +2203,24 @@
       var reset = document.querySelector('.menu-layout-reset');
       if (reset) {
         reset.addEventListener('click', function() {
-          loadMenuLayoutEditor('');
+          loadMenuLayoutEditor('', { edit: true });
         });
       }
       loadMenuLayoutEditor('');
     }
 
     // ── Interface mode (Simple / Everything) ─────────────────────────────
-    // Simple mode hides these tabs (and two "Advanced" sections in Fonts)
-    // until "Show advanced settings" is ticked; preferences/css.html has the
-    // rules. The switch lasts for this dialog only and stores nothing.
+    // One switch, at the top. It is not a preference and Save never sends it:
+    // setUiMode stores it at once and moves the menu with it, and it changes
+    // what is shown, never a setting. In this dialog Simple hides the tabs
+    // below and two "Advanced" sections of the card (preferences/css.html).
+    // Nothing else changes: values not yet saved stay as they are, and so
+    // do unsaved Menu Bar edits. An open sidebar follows at once
+    // (UI_MODE_STORAGE_KEY), so it never has to be refreshed, which would
+    // clear its session's settings. A link straight to a hidden tab
+    // (PREF_NAVIGATE_TAB) shows the hidden tabs for this dialog only.
     var PREF_ADVANCED_TABS_ = ['search', 'linking', 'experimental'];
+    var UI_MODE_STORAGE_KEY = 'sefariaUiMode';
     var _activatePrefTab = null;
 
     function prefDialog_() {
@@ -1828,59 +2231,500 @@
       return tabs.filter(function (t) { return window.getComputedStyle(t).display !== 'none'; });
     }
 
-    function setShowAdvanced_(on) {
+    function currentUiMode_() {
       var dialog = prefDialog_();
-      if (dialog) dialog.classList.toggle('show-advanced', !!on);
-      var box = byId('show_advanced_settings');
-      if (box) box.checked = !!on;
-      // Hiding the tab that is open would leave its panel without a tab.
+      return dialog && dialog.getAttribute('data-ui-mode') === 'simple' ? 'simple' : 'full';
+    }
+
+    // Hiding the tab that is open would leave its panel without a tab.
+    function keepOpenTabVisible_() {
       var selected = document.querySelector('.pref-tab[aria-selected="true"]');
-      if (!on && selected && _activatePrefTab && window.getComputedStyle(selected).display === 'none') {
+      if (selected && _activatePrefTab && window.getComputedStyle(selected).display === 'none') {
         _activatePrefTab(document.querySelector('.pref-tab'));
       }
     }
 
+    function revealAdvancedTabs_() {
+      var dialog = prefDialog_();
+      if (dialog) dialog.classList.add('show-advanced');
+    }
+
     function setInterfaceModeUi_(mode) {
       var dialog = prefDialog_();
-      if (dialog) dialog.setAttribute('data-ui-mode', mode === 'simple' ? 'simple' : 'full');
+      if (dialog) {
+        dialog.setAttribute('data-ui-mode', mode === 'simple' ? 'simple' : 'full');
+        dialog.classList.remove('show-advanced');
+      }
       document.querySelectorAll('input[name="interface_mode_choice"]').forEach(function (input) {
         input.checked = input.value === mode;
       });
-      setShowAdvanced_(byId('show_advanced_settings') && byId('show_advanced_settings').checked);
+      keepOpenTabVisible_();
+    }
+
+    function announceUiModeToSidebar_(mode) {
+      try { localStorage.setItem(UI_MODE_STORAGE_KEY, JSON.stringify({ mode: mode, at: Date.now() })); } catch (e) {}
+    }
+
+    function interfaceModeMessage_(mode, result, keptMenuEdits) {
+      var parts = [mode === 'simple'
+        ? 'Simple: the sidebar, the menu and Preferences show the essentials.'
+        : 'Everything: all enabled tools and additional settings are shown.'];
+      parts.push('Your settings are unchanged.');
+      if (keptMenuEdits) parts.push('Your unsaved Menu Bar changes are kept; Save to apply them.');
+      else if (result && result.menuKept) parts.push('Your menu was kept as you arranged it.');
+      return parts.join(' ');
     }
 
     function initInterfaceMode() {
-      var dialog = prefDialog_();
-      var current = dialog && dialog.getAttribute('data-ui-mode') === 'simple' ? 'simple' : 'full';
+      var current = currentUiMode_();
       setInterfaceModeUi_(current);
       var status = byId('interface-mode-status');
       document.querySelectorAll('input[name="interface_mode_choice"]').forEach(function (input) {
         input.addEventListener('change', function () {
           if (!input.checked) return;
-          var previous = current;
+          var previous = currentUiMode_();
           if (status) status.textContent = '';
           modalBusyShow('Switching the interface…');
           google.script.run.withSuccessHandler(function (result) {
             modalBusyHide();
             current = (result && result.uiMode) || input.value;
             setInterfaceModeUi_(current);
-            // setUiMode may have moved the menu; keep the Menu Bar editor (and
-            // what Save sends) in step with it.
-            loadMenuLayoutEditor((result && result.menuLayout) || '');
-            if (status) {
-              status.textContent = (result && result.menuKept)
-                ? 'Saved. Your menu was kept as you arranged it. Refresh the sidebar to see the change.'
-                : 'Saved. Refresh the sidebar to see the change.';
-            }
+            announceUiModeToSidebar_(current);
+            // Everything is wider, for the extra tabs and editors (preferencesPopup).
+            try { google.script.host.setWidth(current === 'full' ? 860 : 600); } catch (e) {}
+            // setUiMode may have moved the stored menu. Show it in the Menu
+            // Bar editor, unless the editor holds changes not saved yet:
+            // those stay, and Save stores them.
+            var storedMenu = (result && (editingDocument_ ? result.documentMenuLayout : result.menuLayout)) || '';
+            var keptMenuEdits = menuLayoutHasUnsavedChanges();
+            if (keptMenuEdits) markMenuLayoutSaved(storedMenu);
+            else loadMenuLayoutEditor(storedMenu);
+            // Update only the stored menu's baseline, not the rest of the
+            // form. A visibility switch must neither lose edits nor mark
+            // previously unsaved edits as saved.
+            syncFormMenuBaseline_();
+            if (status) status.textContent = interfaceModeMessage_(current, result, keptMenuEdits);
           }).withFailureHandler(function () {
             modalBusyHide();
             setInterfaceModeUi_(previous);
-            if (status) status.textContent = 'Could not change the interface.';
+            if (status) status.textContent = 'Could not change the interface. Nothing was changed.';
           }).setUiMode(input.value);
         });
       });
-      var box = byId('show_advanced_settings');
-      if (box) box.addEventListener('change', function () { setShowAdvanced_(box.checked); });
+    }
+
+    // ── Sidebar tab (Preferences → Sidebar) ──────────────────────────────
+    // Saved with Save, like every other tab, and an open sidebar follows
+    // (markPreferencesSaved → syncSidebarControls in sidebar/js/mode-controller).
+    // The Voices and Lexicon switches are settings of their own; the Quick
+    // Actions and Insertion Options switches are helpers without a name that
+    // write two hidden lists (sidebar_quick_actions_hidden,
+    // sidebar_options_hidden), so Save, Reset To Defaults and a settings file
+    // treat them like any other setting. applyPreferencesToForm unticks every
+    // nameless checkbox, so loadSidebarControlsFromFields_ redraws them after.
+    // A switched-off tab takes its Insertion Defaults sub-tab with it
+    // (data-sidebar-tabs, preferences/css), as soon as it is switched.
+    function sidebarTabsFromSwitches_() {
+      var tabs = ['texts'];
+      document.querySelectorAll('.sidebar-tab-switch').forEach(function (box) {
+        if (box.checked) tabs.push(box.getAttribute('data-sidebar-tab'));
+      });
+      return tabs;
+    }
+
+    function syncSidebarTabsUi_() {
+      var tabs = sidebarTabsFromSwitches_();
+      var dialog = prefDialog_();
+      if (dialog) dialog.setAttribute('data-sidebar-tabs', tabs.join(' '));
+      // An Insertion Defaults sub-tab that is now hidden gives way to Texts.
+      var open = document.querySelector('.pref-workflow-tab[aria-selected="true"]');
+      if (open && tabs.indexOf(open.getAttribute('data-workflow')) < 0) {
+        var texts = document.querySelector('.pref-workflow-tab[data-workflow="texts"]');
+        if (texts) texts.click();
+      }
+    }
+
+    var SIDEBAR_HIDDEN_LISTS_ = [
+      { field: 'sidebar_quick_actions_hidden', selector: '.sidebar-quick-action-switch', attr: 'data-sidebar-quick-action' },
+      { field: 'sidebar_options_hidden', selector: '.sidebar-option-switch', attr: 'data-sidebar-option' }
+    ];
+
+    function writeSidebarHiddenList_(list) {
+      var hidden = [];
+      document.querySelectorAll(list.selector).forEach(function (box) {
+        if (!box.checked) hidden.push(box.getAttribute(list.attr));
+      });
+      var field = byId(list.field);
+      if (field) field.value = JSON.stringify(hidden);
+    }
+
+    function loadSidebarControlsFromFields_() {
+      SIDEBAR_HIDDEN_LISTS_.forEach(function (list) {
+        var hidden = [];
+        try { hidden = JSON.parse((byId(list.field) || {}).value || '[]'); } catch (e) { hidden = []; }
+        if (!Array.isArray(hidden)) hidden = [];
+        document.querySelectorAll(list.selector).forEach(function (box) {
+          box.checked = hidden.indexOf(box.getAttribute(list.attr)) < 0;
+        });
+        writeSidebarHiddenList_(list);
+      });
+      syncSidebarTabsUi_();
+    }
+
+    function initSidebarControls() {
+      document.querySelectorAll('.sidebar-tab-switch').forEach(function (box) {
+        box.addEventListener('change', function () {
+          syncSidebarTabsUi_();
+          if (menuLayoutState) renderMenuLayoutEditor();
+        });
+      });
+      SIDEBAR_HIDDEN_LISTS_.forEach(function (list) {
+        document.querySelectorAll(list.selector).forEach(function (box) {
+          box.addEventListener('change', function () { writeSidebarHiddenList_(list); });
+        });
+      });
+      var showAll = byId('sidebar-options-show-all');
+      if (showAll) {
+        showAll.addEventListener('click', function () {
+          document.querySelectorAll('.sidebar-option-switch').forEach(function (box) { box.checked = true; });
+          writeSidebarHiddenList_(SIDEBAR_HIDDEN_LISTS_[1]);
+        });
+      }
+    }
+
+    // ── Settings profiles ────────────────────────────────────────────
+    // The rail selects the destination for the form. Document edits use a
+    // separate saved layer; reusable profiles use the existing account store.
+    var settingsProfiles_ = null;
+    var preferencesBaseline_ = null;
+    var profileNameMode_ = null;
+    var documentProfile_ = { key: '', hasOverrides: false };
+    var editingDocument_ = false;
+
+    function adoptDocumentProfile_(result) {
+      documentProfile_ = result;
+      settingsProfiles_ = result.profiles || settingsProfiles_;
+    }
+
+    function markFormClean_(saved) {
+      preferencesBaseline_ = JSON.stringify(saved || collectPreferenceObject());
+    }
+
+    function syncFormMenuBaseline_() {
+      if (preferencesBaseline_ === null || menuLayoutSavedValue === null) return;
+      var baseline = JSON.parse(preferencesBaseline_);
+      baseline.menu_layout = menuLayoutSavedValue;
+      preferencesBaseline_ = JSON.stringify(baseline);
+    }
+
+    function formHasUnsavedChanges_() {
+      return preferencesBaseline_ !== null && JSON.stringify(collectPreferenceObject()) !== preferencesBaseline_;
+    }
+
+    function profileIndex_() {
+      return settingsProfiles_ || { active: 'p1', implicit: true, max: 10, profiles: [{ id: 'p1', name: 'User Profile' }] };
+    }
+
+    function profileById_(id) {
+      return profileIndex_().profiles.filter(function (p) { return p.id === id; })[0] || null;
+    }
+
+    function activeProfile_() {
+      return profileById_(profileIndex_().active) || profileIndex_().profiles[0];
+    }
+
+    function quoted_(name) {
+      return '“' + name + '”';
+    }
+
+    function renderSettingsProfiles_() {
+      var list = byId('pref-profile-list');
+      if (!list) return;
+      var index = profileIndex_();
+      list.textContent = '';
+      var profiles = index.profiles;
+      if (documentProfile_.key) profiles = [{ id: 'document', name: 'This Document' }].concat(profiles);
+      profiles.forEach(function (profile) {
+        var current = profile.id === (editingDocument_ ? 'document' : index.active);
+        var item = document.createElement('li');
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'pref-profile-item';
+        button.setAttribute('data-profile-id', profile.id);
+        button.setAttribute('aria-current', current ? 'true' : 'false');
+        button.title = current ? 'In use: the tabs edit this profile' : 'Switch to this profile';
+        var dot = document.createElement('span');
+        dot.className = 'pref-profile-item-dot';
+        dot.setAttribute('aria-hidden', 'true');
+        var name = document.createElement('span');
+        name.className = 'pref-profile-item-name';
+        name.textContent = profile.name;
+        button.appendChild(dot);
+        button.appendChild(name);
+        item.appendChild(button);
+        list.appendChild(item);
+      });
+      var profile = activeProfile_();
+      var protectedProfile = editingDocument_ || profile.id === 'p1';
+      byId('pref-profile-delete').disabled = protectedProfile;
+      byId('pref-profile-rename').disabled = protectedProfile;
+      byId('pref-editing-profile').textContent = editingDocument_ ? 'This Document' : profile.name;
+      byId('pref-profile-scope').textContent = editingDocument_
+        ? 'Changes apply only to this Google Doc. Import/Export and Factory apply to reusable profiles.'
+        : 'Reusable profiles store text, layout and appearance. Other settings are shared across the account.';
+      var save = editingDocument_ ? 'Save changes to this document' : 'Save changes to ' + quoted_(profile.name);
+      $('.save-preferences-button').attr({ title: save, 'aria-label': save });
+      $('.close-preferences-button').attr('title', save);
+      document.querySelectorAll('.pref-preset-button').forEach(function (button) {
+        if (button.dataset.preset !== 'factory') button.hidden = (button.dataset.preset === 'document') !== editingDocument_;
+        if (button.dataset.preset === 'profile') button.textContent = 'Reset ' + profile.name;
+      });
+      byId('pref-profile-new').hidden = profileNameMode_ === 'create' || index.profiles.length >= (index.max || 10);
+      renderProfileNameField_(protectedProfile ? null : profile);
+    }
+
+    function renderProfileNameField_(profile) {
+      var creating = profileNameMode_ === 'create';
+      var field = byId('pref-profile-name-field');
+      field.hidden = !creating && !profile;
+      var target = creating ? 'new' : profile ? profile.id : '';
+      if (field.dataset.target !== target) {
+        field.dataset.target = target;
+        byId('pref-profile-name').value = !creating && profile ? profile.name : '';
+      }
+      byId('pref-profile-name-label').textContent = creating ? 'New profile name' : 'Profile name';
+      byId('pref-profile-name-ok').textContent = creating ? 'Create' : 'Rename';
+      byId('pref-profile-name-cancel').hidden = !creating;
+    }
+
+    function closeProfileNameField_() {
+      profileNameMode_ = null;
+      delete byId('pref-profile-name-field').dataset.target;
+      renderSettingsProfiles_();
+    }
+
+    function openProfileNameField_(mode) {
+      if (preferencesBaseline_ === null) return;
+      if (mode === 'rename') closeProfileNameField_();
+      else {
+        profileNameMode_ = 'create';
+        renderSettingsProfiles_();
+      }
+      _activatePrefTab(byId('pref-tab-profiles-btn'));
+      var input = byId('pref-profile-name');
+      input.focus();
+      input.select();
+    }
+
+    // The dialog's one question: three buttons at most; Cancel closes it.
+    function askProfileQuestion_(question) {
+      var modal = byId('profile_modal');
+      byId('profile_modal_title').textContent = question.title;
+      byId('profile_modal_message').textContent = question.message;
+      var ok = byId('profile_modal_ok');
+      var alt = byId('profile_modal_alt');
+      ok.textContent = question.ok;
+      ok.classList.toggle('danger', !!question.danger);
+      ok.classList.toggle('blue', !question.danger);
+      alt.hidden = !question.alt;
+      alt.textContent = question.alt || '';
+      var returnFocus = document.activeElement;
+      var background = document.querySelectorAll('.preferences-shell, .save-bar');
+      function close() {
+        modal.hidden = true;
+        background.forEach(function (region) { region.inert = false; });
+        if (returnFocus) returnFocus.focus();
+      }
+      ok.onclick = function () { close(); question.onOk(); };
+      alt.onclick = function () { close(); if (question.onAlt) question.onAlt(); };
+      byId('profile_modal_cancel').onclick = close;
+      modal.hidden = false;
+      background.forEach(function (region) { region.inert = true; });
+      (question.danger ? byId('profile_modal_cancel') : ok).focus();
+    }
+
+    function preferenceChanges_() {
+      var before = JSON.parse(preferencesBaseline_ || '{}');
+      var current = collectPreferenceObject();
+      var changes = {};
+      Object.keys(current).forEach(function (key) {
+        if (current[key] !== before[key]) changes[key] = current[key];
+      });
+      return changes;
+    }
+
+    function describePreferenceChanges_(changes) {
+      return Object.keys(changes).map(function (key) {
+        var commonLabels = {
+          source_emphasis_mode: 'Commentary', source_notes_mode: 'Notes',
+          nekudot: 'Vowels', teamim: 'Cantillation', output_mode_default: 'Display',
+          bilingual_layout_default: 'Layout', bilingual_aligned_rows: 'Line by line',
+          include_transliteration_default: 'Transliteration', menu_layout: 'Menu Bar'
+        };
+        return commonLabels[key] || key.replace(/_default$/, '').replace(/_/g, ' ').replace(/^./, function (c) {
+          return c.toUpperCase();
+        });
+      });
+    }
+
+    function saveFormThen_(next) {
+      if (preferencesBaseline_ === null) return;
+      var preferenceObject = preferenceChanges_();
+      var names = describePreferenceChanges_(preferenceObject);
+      var scope = editingDocument_ ? 'This Document' : activeProfile_().name;
+      if (!names.length) {
+        setResultsMessage('No changes to save for ' + quoted_(scope) + '.');
+        if (next) next();
+        return;
+      }
+      modalBusyShow('Saving ' + scope + '…');
+      var run = google.script.run.withSuccessHandler(function (result) {
+        if (editingDocument_) adoptDocumentProfile_(result);
+        applyPreferencesToForm(result.preferences);
+        renderSettingsProfiles_();
+        markPreferencesSaved();
+        modalBusyHide();
+        if (pendingSidebarPreferences) pendingSidebarPreferences.finish('');
+        var rest = names.length > 3 ? ' and ' + (names.length - 3) + ' more' : '';
+        setResultsMessage('Saved to ' + quoted_(scope) + '. Updated ' + names.slice(0, 3).join(', ') + rest + '.');
+        if (next) next();
+      }).withFailureHandler(function (error) {
+        modalBusyHide();
+        setResultsMessage((error && error.message) || 'Could not save ' + scope + '.');
+      });
+      if (editingDocument_) run.saveDocumentPreferenceProfile(preferenceObject, documentProfile_.key);
+      else run.savePreferenceDefaults(preferenceObject, activeProfile_().id);
+    }
+
+    // Unsaved changes belong to the profile in use: save them to it, drop
+    // them, or stay.
+    function withUnsavedChangesHandled_(doing, proceed, saveAction) {
+      if (!formHasUnsavedChanges_()) { proceed(); return; }
+      askProfileQuestion_({
+        title: 'Save your changes first?',
+        message: 'Your changes to ' + quoted_(editingDocument_ ? 'This Document' : activeProfile_().name) + ' aren’t saved. ' + doing,
+        ok: saveAction ? saveAction.label : 'Save and continue',
+        alt: 'Don’t save',
+        onOk: function () { saveFormThen_(saveAction ? saveAction.onSave : proceed); },
+        onAlt: proceed
+      });
+    }
+
+    // What every profile change does with the server's answer.
+    function profileAnswer_(busy, reload, describe) {
+      setResultsMessage('');
+      modalBusyShow(busy);
+      return {
+        ok: function (result) {
+          modalBusyHide();
+          var before = activeProfile_();
+          settingsProfiles_ = (result && result.profiles) || settingsProfiles_;
+          if (reload && result && result.preferences) {
+            editingDocument_ = false;
+            applyPreferencesToForm(result.preferences);
+          }
+          markPreferencesSaved();
+          closeProfileNameField_();
+          setResultsMessage(describe(before, activeProfile_()));
+        },
+        fail: function (error) {
+          modalBusyHide();
+          setResultsMessage((error && error.message) || 'Could not change profiles. Nothing was changed.');
+        }
+      };
+    }
+
+    function switchToProfile_(id, next, forTransfer) {
+      if (preferencesBaseline_ === null) return;
+      var target = id === 'document' ? { name: 'This Document' } : profileById_(id);
+      if (!target || id === (editingDocument_ ? 'document' : profileIndex_().active)) return;
+      var question = forTransfer ? 'Import/Export uses the saved settings for ' + quoted_(target.name) + '.'
+        : 'Switching to ' + quoted_(target.name) + ' loads its settings here.';
+      withUnsavedChangesHandled_(question, function () {
+        if (id === 'document') {
+          modalBusyShow('Loading this document…');
+          google.script.run.withSuccessHandler(function (result) {
+            modalBusyHide();
+            adoptDocumentProfile_(result);
+            editingDocument_ = true;
+            applyPreferencesToForm(result.preferences);
+            closeProfileNameField_();
+            setResultsMessage('Editing This Document.');
+          }).withFailureHandler(function (error) {
+            modalBusyHide();
+            setResultsMessage((error && error.message) || 'Could not load this document.');
+          }).getDocumentPreferenceProfile();
+          return;
+        }
+        var answer = profileAnswer_(forTransfer ? 'Loading saved settings for Import/Export…' : 'Switching profile…', true, function (before, now) {
+          return 'Now using ' + quoted_(now.name) + '.';
+        });
+        if (id === profileIndex_().active) {
+          google.script.run.withSuccessHandler(function (preferences) {
+            answer.ok({ preferences: preferences });
+            if (next) next();
+          }).withFailureHandler(answer.fail).getAccountPreferences();
+          return;
+        }
+        google.script.run.withSuccessHandler(answer.ok).withFailureHandler(answer.fail).switchSettingsProfile(id);
+      });
+    }
+
+    function submitProfileName_() {
+      var name = byId('pref-profile-name').value;
+      if (profileNameMode_ !== 'create') {
+        var profile = activeProfile_();
+        if (editingDocument_ || profile.id === 'p1' || name.trim() === profile.name) return;
+        var id = profile.id;
+        var renamed = profileAnswer_('Renaming…', false, function (before, now) {
+          return 'Renamed to ' + quoted_(now.name) + '.';
+        });
+        google.script.run.withSuccessHandler(renamed.ok).withFailureHandler(renamed.fail).renameSettingsProfile(id, name);
+        return;
+      }
+      withUnsavedChangesHandled_('A new profile starts as a copy of ' + quoted_(activeProfile_().name) + '.', function () {
+        var created = profileAnswer_('Making the profile…', true, function (before, now) {
+          return quoted_(now.name) + ' is ready and in use, a copy of ' + quoted_(before.name) + '. Change what you like, then use Save & Close.';
+        });
+        google.script.run.withSuccessHandler(created.ok).withFailureHandler(created.fail).createSettingsProfile(name);
+      });
+    }
+
+    function deleteActiveProfile_() {
+      var index = profileIndex_();
+      var doomed = activeProfile_();
+      var next = index.profiles.filter(function (p) { return p.id !== doomed.id; })[0];
+      if (editingDocument_ || doomed.id === 'p1' || !next) return;
+      askProfileQuestion_({
+        title: 'Delete ' + quoted_(doomed.name) + '?',
+        message: 'Its settings are deleted, and Preferences switches to ' + quoted_(next.name) + '. Changes not saved here are dropped.',
+        ok: 'Delete',
+        onOk: function () {
+          var answer = profileAnswer_('Deleting the profile…', true, function (before, now) {
+            return quoted_(doomed.name) + ' deleted. Now using ' + quoted_(now.name) + '.';
+          });
+          google.script.run.withSuccessHandler(answer.ok).withFailureHandler(answer.fail).deleteSettingsProfile(doomed.id);
+        }
+      });
+    }
+
+    function initSettingsProfiles() {
+      var list = byId('pref-profile-list');
+      if (!list) return;
+      list.addEventListener('click', function (event) {
+        var button = event.target.closest('.pref-profile-item');
+        if (button) switchToProfile_(button.getAttribute('data-profile-id'));
+      });
+      byId('pref-profile-new').addEventListener('click', function () { openProfileNameField_('create'); });
+      byId('pref-profile-rename').addEventListener('click', function () { openProfileNameField_('rename'); });
+      byId('pref-profile-delete').addEventListener('click', deleteActiveProfile_);
+      byId('pref-profile-name-ok').addEventListener('click', submitProfileName_);
+      byId('pref-profile-name-cancel').addEventListener('click', closeProfileNameField_);
+      byId('pref-profile-name').addEventListener('keydown', function (event) {
+        if (event.key === 'Enter') { event.preventDefault(); submitProfileName_(); }
+        if (event.key === 'Escape') { event.preventDefault(); closeProfileNameField_(); }
+      });
+      renderSettingsProfiles_();
     }
 
     function _initPreferencesTabs() {
@@ -1909,8 +2753,9 @@
       var preferredTab = window.PREF_NAVIGATE_TAB || sessionStorage.getItem('PREF_NAVIGATE_TAB');
       sessionStorage.removeItem('PREF_NAVIGATE_TAB');
 
-      // A hint that lands on a tab Simple mode hides shows the advanced tabs.
-      if (preferredTab && PREF_ADVANCED_TABS_.indexOf(preferredTab) >= 0) setShowAdvanced_(true);
+      // A hint that lands on a tab Simple mode hides shows the hidden tabs,
+      // for this dialog only.
+      if (preferredTab && PREF_ADVANCED_TABS_.indexOf(preferredTab) >= 0 && currentUiMode_() === 'simple') revealAdvancedTabs_();
 
       var initial = null;
       if (preferredTab) {
@@ -1962,14 +2807,36 @@
       });
     }
 
+    // What the Import/Export modal (preferences/settings-file-js,
+    // loaded after this file) needs from the dialog.
+    window.PreferencesDialog = {
+      collect: collectPreferenceObject,
+      reloadFrom: function (stored) { applyPreferencesToForm(stored || {}); },
+      markSaved: markPreferencesSaved,
+      showInterfaceMode: function (mode) {
+        setInterfaceModeUi_(mode);
+        announceUiModeToSidebar_(mode);
+      },
+      currentUiMode: currentUiMode_,
+      activeProfileId: function () { return profileIndex_().active; },
+      withTransferProfile: function (open) {
+        if (editingDocument_) switchToProfile_(activeProfile_().id, open, true);
+        else if (preferencesBaseline_ !== null) open();
+      }
+    };
+
     _initPreferencesTabs();
     initInterfaceMode();
+    initSidebarControls();
+    initSettingsProfiles();
     initPrefButtonGroups();
     initPrefTranslitDropdown();
     initWorkflowTabs();
     initMenuLayoutEditor();
     bindColorControls();
     initCorpusOrderList();
+    voicesTopicOrderEditor.init();
+    dictionaryOrderEditor.init();
     initLanguageTypographyEditor();
     initTranslationLanguageGrid();
     _initPreferencesCompositionCard();

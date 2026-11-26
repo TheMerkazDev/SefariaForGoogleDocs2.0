@@ -27,13 +27,12 @@
 
 /* .versions-section panel chrome is shared with layout.css panel shells. */
 /* The details inside gets a slight shadow lift from the shared panel rule. */
-/* CRITICAL: .versions-section must have flex: 0 0 auto, min-height: 0 and overflow: hidden */
-/* to prevent escape from .sidebar-scroll container. */
+/* Let the help tooltips overlap adjacent sections inside the sidebar scroll area. */
 
 .versions-section {
   flex: 0 0 auto;
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .versions-panel,
@@ -46,11 +45,6 @@
 .versions-panel.more-options-card {
   background: #fcfcfb;
   border-color: #ece9e3;
-}
-
-.versions-section.single-translation .translation-version-control,
-.versions-section.single-translation .advanced-version-details {
-  display: none;
 }
 
 /* =============================================================
@@ -161,6 +155,13 @@
   line-height: 1.5;
 }
 
+/* The translations a multi-version insert will add, in order. */
+.preview-multi-list {
+  margin: 6px 0;
+  padding-left: 20px;
+  color: var(--text);
+}
+
 .preview-state-title {
   margin: 0 0 6px;
   font-size: 14px;
@@ -176,6 +177,35 @@
   width: 50%;
   padding: 0 6px 8px;
   vertical-align: top;
+}
+
+.preview-table.preview-three-columns td {
+  width: 33.333%;
+}
+
+.preview-transliteration {
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.preview-transliteration:not(:empty) {
+  margin-bottom: 6px;
+}
+
+.book-contents {
+  display: grid;
+  gap: 6px;
+  padding: 6px;
+  text-align: left;
+}
+
+.book-contents label {
+  color: var(--sefaria-blue);
+  font-weight: 700;
+}
+
+.book-contents select {
+  width: 100%;
 }
 
 /* =============================================================

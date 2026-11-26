@@ -1,21 +1,67 @@
 // Document actions module: Quick Actions menu handlers for in-document text
 // transformation (divine names) and reference linking to Sefaria.
 
+/**
+ * The divine-name rules switched on, as the confirmation lists them. Defaults
+ * match the replacements transformDivineNames falls back to.
+ */
+function enabledDivineNameRules_(prefs) {
+  const p = prefs || {};
+  return [
+    { on: p.meforash_replace, name: 'יהוה', replacement: p.meforash_replacement || 'יי' },
+    { on: p.yaw_replace, name: 'יה', replacement: p.yaw_replacement || 'קה' },
+    { on: p.elodim_replace, name: 'אלהים / אלוהים', replacement: p.elodim_replacement || 'אלוקים' },
+    { on: p.god_replace, name: 'God', replacement: p.god_replacement || 'G-d' }
+  ].filter(function (rule) { return rule.on == 'true'; })
+    .map(function (rule) { return { name: rule.name, replacement: String(rule.replacement) }; });
+}
+
+/**
+ * What Transform Divine Names is about to change, asked before it changes it.
+ * It edits every match in the body of the open tab: a selection does not limit
+ * it, and headers, footers, footnotes and other tabs are left alone. Nothing
+ * said so; Preferences called it "document-wide", and a tutorial promised that
+ * unselected text would be kept (BUG-006). The scope is unchanged; it is stated.
+ */
+function divineNameTransformPrompt_(rules, hasSelection) {
+  return 'This replaces every match in the body of the tab you have open \u2014 the whole tab, not only selected text. ' +
+    'Headers, footers, footnotes and other tabs are not changed.' +
+    (hasSelection ? '\n\nYou have text selected: the selection does not limit what is replaced.' : '') +
+    '\n\nRules turned on (Preferences \u2192 Divine Name Mappings):\n' +
+    rules.map(function (rule) { return '    ' + rule.name + '  \u2192  ' + rule.replacement; }).join('\n') +
+    '\n\nEdit \u2192 Undo reverses it. Continue?';
+}
+
+function divineNameTransformSummary_(count) {
+  if (!count) return 'No divine names matching your rules were found in this tab\u2019s body. Nothing was changed.';
+  return 'Replaced ' + count + ' divine name' + (count === 1 ? '' : 's') + ' in this tab\u2019s body.';
+}
+
 function transformDivineNames() {
-  const body = DocumentApp.getActiveDocument().getBody();
+  const doc = DocumentApp.getActiveDocument();
+  const body = doc.getBody();
   const prefs = getPreferences();
-  const noTransformsEnabled = [prefs.meforash_replace, prefs.yaw_replace, prefs.elodim_replace, prefs.god_replace]
-    .every((value) => value != "true");
-  if (noTransformsEnabled) {
-    DocumentApp.getUi().alert('No divine-name transforms are enabled. Open Preferences and enable at least one transform before running this action.');
+  const ui = DocumentApp.getUi();
+  const rules = enabledDivineNameRules_(prefs);
+  if (!rules.length) {
+    ui.alert('No divine-name transforms are enabled. Open Preferences and enable at least one transform before running this action.');
     return;
   }
-  const hebrewMarks = "\\u0591-\\u05C7";
-  const hebrewChars = "\\u0590-\\u05FF";
+  let hasSelection = false;
+  try { hasSelection = !!(doc.getSelection && doc.getSelection()); } catch (e) { hasSelection = false; }
+  if (ui.alert('Transform Divine Names', divineNameTransformPrompt_(rules, hasSelection), ui.ButtonSet.YES_NO) !== ui.Button.YES) {
+    return;
+  }
+  let replacedCount = 0;
+  // A name's letters and their marks (HEBREW_LETTER_MARKS_). Maqaf, paseq and
+  // sof pasuq end a word: a name before one is matched and the mark kept.
+  const hebrewMarks = HEBREW_LETTER_MARKS_;
+  const hebrewChars = hebrewMarks + "\\u05D0-\\u05EA";
   const replaceRangesInTextElement = (textElement, ranges) => {
     if (!ranges || !ranges.length) {
       return;
     }
+    replacedCount += ranges.length;
 
     for (let i = ranges.length - 1; i >= 0; i--) {
       const range = ranges[i];
@@ -51,7 +97,8 @@ function transformDivineNames() {
       const tokenStart = match.index + prefix.length;
       const tokenEnd = tokenStart + token.length - 1;
       if (token.length > 0) {
-        ranges.push({ start: tokenStart, end: tokenEnd, replacement });
+        // The occurrence's vowels and cantillation stay on the substitute.
+        ranges.push({ start: tokenStart, end: tokenEnd, replacement: markDivineNameSubstitute_(token, replacement) });
       }
     }
 
@@ -111,9 +158,189 @@ function transformDivineNames() {
       replaceHebrewWordInTextElement(textElement, `א[${hebrewMarks}]*ל[${hebrewMarks}]*(?:ו[${hebrewMarks}]*)?ה[${hebrewMarks}]*י[${hebrewMarks}]*ם[${hebrewMarks}]*`, prefs.elodim_replacement || "אלוקים");
     }
     if (prefs.god_replace == "true") {
-      replaceRegexInTextElement(textElement, /\bGod\b/g, prefs.god_replacement || "G-d");
+      // "God" and "GOD" only; lowercase "god"/"gods" are untouched.
+      const godReplacement = prefs.god_replacement || "G-d";
+      replaceRegexInTextElement(textElement, /\bGod\b/g, godReplacement);
+      replaceRegexInTextElement(textElement, /\bGOD\b/g, godReplacement.toUpperCase());
     }
   });
+
+  ui.alert(divineNameTransformSummary_(replacedCount));
+}
+
+// Selection ranges can name a paragraph, table cell or other container, not
+// just a Text element. Expand containers without treating unselected text as
+// selected. Link Texts additionally maps every selected leaf to the active body.
+function walkSelectionTextLeaves_(element, visit) {
+  if (element.getType() === DocumentApp.ElementType.TEXT) {
+    visit(element);
+    return;
+  }
+  if (element.getNumChildren && element.getChild) {
+    for (let i = 0; i < element.getNumChildren(); i++) {
+      walkSelectionTextLeaves_(element.getChild(i), visit);
+    }
+  }
+}
+
+function selectedTextPieces_(selection) {
+  const pieces = [];
+  if (!selection) return pieces;
+  selection.getRangeElements().forEach(function (range) {
+    const element = range.getElement();
+    if (range.isPartial() && element.getType() !== DocumentApp.ElementType.TEXT) {
+      throw new Error('This selected range cannot be read safely. Select text rather than a document object.');
+    }
+    walkSelectionTextLeaves_(element, function (leaf) {
+      const value = String(leaf.asText().getText() || '');
+      const start = range.isPartial() ? range.getStartOffset() : 0;
+      const end = range.isPartial() ? range.getEndOffsetInclusive() + 1 : value.length;
+      if (start < 0 || end > value.length || end < start) throw new Error('The selection changed. Select the text again.');
+      if (end > start) pieces.push({ element: leaf, start: start, end: end, text: value });
+    });
+  });
+  return pieces;
+}
+
+function selectedPlainText_(selection) {
+  return selectedTextPieces_(selection).map(function (piece) {
+    return piece.text.slice(piece.start, piece.end);
+  }).join('\n');
+}
+
+// Structural paths distinguish identical paragraphs. Do not use indexOf on
+// the selected words, which could pick an occurrence outside the selection.
+function selectionBodyPath_(element) {
+  const path = [];
+  let node = element;
+  while (node && node.getType() !== DocumentApp.ElementType.BODY_SECTION) {
+    const parent = node.getParent && node.getParent();
+    if (!parent || !parent.getChildIndex) return null;
+    const index = parent.getChildIndex(node);
+    if (index < 0) return null;
+    path.unshift(index);
+    node = parent;
+  }
+  return node ? path.join('/') : null;
+}
+
+function selectionTextHash_(text) {
+  return Utilities.base64EncodeWebSafe(Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256, String(text), Utilities.Charset.UTF_8));
+}
+
+function selectionDocumentIdentity_(doc) {
+  return {
+    documentId: doc.getId ? doc.getId() : '',
+    tabId: doc.getActiveTab ? doc.getActiveTab().getId() : ''
+  };
+}
+
+// Match the body editAsText coordinate system against its ordered text leaves.
+// The only allowed non-leaf content is a structural newline. Fail closed on
+// unsupported structures instead of scanning or editing a different range.
+function selectionBodyRanges_(body, docText, pieces) {
+  const wanted = {};
+  pieces.forEach(function (piece) {
+    const path = selectionBodyPath_(piece.element);
+    if (path === null) throw new Error('Only selections in the document body can be linked or inserted.');
+    if (!wanted[path]) wanted[path] = [];
+    wanted[path].push(piece);
+  });
+  const ranges = [];
+  let at = 0;
+  walkSelectionTextLeaves_(body, function (leaf) {
+    const value = String(leaf.asText().getText() || '');
+    if (!value) return;
+    // A literal newline belonging to the next leaf is not a structural gap.
+    while (docText.slice(at, at + value.length) !== value && docText.charAt(at) === '\n') at++;
+    if (docText.slice(at, at + value.length) !== value) throw new Error('Could not locate the selected text safely. Try selecting one paragraph at a time.');
+    const path = selectionBodyPath_(leaf);
+    (wanted[path] || []).forEach(function (piece) {
+      if (piece.text !== value) throw new Error('The selection changed. Select the text again.');
+      ranges.push({ start: at + piece.start, end: at + piece.end });
+    });
+    delete wanted[path];
+    at += value.length;
+  });
+  if (Object.keys(wanted).length || /[^\n]/.test(docText.slice(at))) {
+    throw new Error('Could not locate the selected text safely. Try selecting one paragraph at a time.');
+  }
+  const sorted = ranges.sort(function (a, b) { return a.start - b.start; });
+  return sorted.reduce(function (out, range) {
+    const last = out[out.length - 1];
+    if (last && range.start <= last.end) last.end = Math.max(last.end, range.end);
+    else out.push(range);
+    return out;
+  }, []);
+}
+
+function captureLinkerScope_(doc, insertIntent) {
+  const selection = doc.getSelection ? doc.getSelection() : null;
+  if (!selection) {
+    if (insertIntent) throw new Error('Select a reference or references first.');
+    return { selected: false, insertIntent: false };
+  }
+  const pieces = selectedTextPieces_(selection);
+  const body = doc.getBody();
+  const text = body.editAsText().getText();
+  const ranges = selectionBodyRanges_(body, text, pieces);
+  const query = ranges.map(function (range) { return text.slice(range.start, range.end); }).join('\n').trim();
+  if (!query) throw new Error('No text is selected. Select text, or clear the selection to link the whole document.');
+  return Object.assign({ selected: true, insertIntent: !!insertIntent, ranges: ranges,
+    bodyHash: selectionTextHash_(text) }, selectionDocumentIdentity_(doc));
+}
+
+function verifyLinkerScope_(scope, doc, text) {
+  if (!scope || !scope.selected) return;
+  const identity = selectionDocumentIdentity_(doc);
+  if (scope.documentId !== identity.documentId || scope.tabId !== identity.tabId ||
+      scope.bodyHash !== selectionTextHash_(text) || !Array.isArray(scope.ranges) ||
+      !scope.ranges.length || scope.ranges.some(function (range) {
+        return !Number.isInteger(range.start) || !Number.isInteger(range.end) ||
+          range.start < 0 || range.end <= range.start || range.end > text.length;
+      })) throw new Error('The selected document or text changed. Select it again and reopen this command.');
+}
+
+// Prefilter each selected slice separately. Never upload a window extending
+// beyond the selection; retain the original body offsets for link placement.
+function buildScopedLinkerScan_(docText, prefs, scope) {
+  if (!scope.selected) return buildLinkerScanRequest_(docText, prefs);
+  const segments = [];
+  const parts = [];
+  let cursor = 0;
+  let totalChars = 0;
+  scope.ranges.forEach(function (range) {
+    const text = docText.slice(range.start, range.end);
+    totalChars += text.length;
+    const scan = buildLinkerScanRequest_(text, scope.insertIntent ? { linker_scan_mode: 'full' } : prefs);
+    if (!scan) return;
+    if (parts.length) { parts.push('\n\n'); cursor += 2; }
+    const local = scan.segments || [{ docStart: 0, payloadStart: 0, length: scan.payload.length }];
+    local.forEach(function (segment) {
+      segments.push({ docStart: range.start + segment.docStart,
+        payloadStart: cursor + segment.payloadStart, length: segment.length });
+    });
+    parts.push(scan.payload);
+    cursor += scan.payload.length;
+  });
+  return parts.length ? { payload: parts.join(''), segments: segments, scannedChars: cursor, totalChars: totalChars } : null;
+}
+
+function scopedLinkerPlacement_(match, docText, scope) {
+  if (!scope.selected) return match;
+  // A review must never relocate to an identical citation elsewhere. Earlier
+  // edits invalidate this decision; later edits (including end-to-start
+  // insertion of other reviewed rows) do not.
+  return Object.assign(match, { selectionPrefixHash: selectionTextHash_(docText.slice(0, match.endChar)),
+    selectionDocumentId: scope.documentId, selectionTabId: scope.tabId });
+}
+
+function openLinkerReview_(scope) {
+  const template = HtmlService.createTemplateFromFile('linker-results');
+  template.scopeJson = toEmbeddedJson_(scope);
+  const html = template.evaluate().setWidth(760).setHeight(680);
+  DocumentApp.getUi().showModalDialog(html, scope.insertIntent ? 'Insert Source from Selection' : 'Link Texts with Sefaria');
 }
 
 /**
@@ -149,7 +376,7 @@ function buildLinkerScanRequest_(docText, prefs) {
  * after — and told which mode is active, because the answer to "how much of my
  * document?" differs between them. Returns false if the user declines.
  */
-function confirmLinkerUploadOnce_(scanMode) {
+function confirmLinkerUploadOnce_(scanMode, scope) {
   const ACK_KEY = 'linker_upload_acknowledged';
   const userProperties = PropertiesService.getUserProperties();
 
@@ -157,9 +384,11 @@ function confirmLinkerUploadOnce_(scanMode) {
     return true;
   }
 
-  const scopeSentence = (scanMode === 'full')
-    ? 'Right now it is set to send the ENTIRE text of this document.'
-    : 'Right now it is set to send only the passages that look like they contain a citation — the rest of your writing stays in the document.';
+  const scopeSentence = scope && scope.selected
+    ? 'Only the selected text (or citation-like passages inside it) will be sent. Without a selection, Link Texts scans the current tab’s body according to your Linking preferences.'
+    : (scanMode === 'full')
+      ? 'Right now it is set to send all body text in the current tab.'
+      : 'Right now it is set to send only the passages that look like they contain a citation — the rest of your writing stays in the document.';
 
   const ui = DocumentApp.getUi();
   const response = ui.alert(
@@ -195,10 +424,12 @@ function confirmLinkerUploadOnce_(scanMode) {
  *
  * Everything that cannot become a link is counted rather than dropped. The
  * published add-on returned "Linked N references" with no hint that anything
- * else had happened, which is the silence this replaces.
+ * else had happened, which is the silence this replaces. A citation Sefaria
+ * could not match is kept with its words and context (`unmatched`), so the
+ * review dialog can show the reader which ones they were, not just how many.
  *
  * @param {Object} input {rawMatches, refData, segments, docText, isAlreadyLinked}
- * @returns {{matches: Array, unresolvedCount: number}}
+ * @returns {{matches: Array, unmatched: Array, unresolvedCount: number, unplaceableCount: number}}
  */
 function classifyLinkerMatches_(input) {
   const rawMatches = (input && input.rawMatches) || [];
@@ -208,7 +439,7 @@ function classifyLinkerMatches_(input) {
   const isAlreadyLinked = (input && input.isAlreadyLinked) || function () { return false; };
 
   const matches = [];
-  let unresolvedCount = 0;
+  const unmatched = [];
   let unplaceableCount = 0;
 
   for (let i = 0; i < rawMatches.length; i++) {
@@ -216,20 +447,17 @@ function classifyLinkerMatches_(input) {
     if (!raw) continue;
 
     // Sefaria recognised a citation but could not resolve it.
-    if (raw.linkFailed || !Array.isArray(raw.refs) || !raw.refs.length) {
-      unresolvedCount++;
-      continue;
-    }
+    const linkFailed = !!raw.linkFailed || !Array.isArray(raw.refs) || !raw.refs.length;
 
     const range = segments
       ? mapPayloadRangeToDocRange_(segments, Number(raw.startChar), Number(raw.endChar))
       : { startChar: Number(raw.startChar), endChar: Number(raw.endChar) };
     if (!range) {
-      // Sefaria resolved this one, but it was stitched together across two
-      // pre-filter windows, so no contiguous span of the document holds it.
-      // Distinct from "unresolved": the citation is fine, our upload shape lost
-      // it, and the reader has a remedy — scan the whole document. Nothing to
-      // put in the review table, because there is no document text to link.
+      // Stitched together across two pre-filter windows, so no contiguous span
+      // of the document holds it. Distinct from "unresolved": our upload shape
+      // lost it, and the reader has a remedy — scan the whole document. Nothing
+      // to put in the review table, because there is no document text to link
+      // (or, for a failed one, to show).
       unplaceableCount++;
       continue;
     }
@@ -242,24 +470,22 @@ function classifyLinkerMatches_(input) {
       continue;
     }
 
-    // Already hyperlinked: leave it alone, and do not report it as a problem.
+    // Already hyperlinked: leave it alone, and do not report it as a problem —
+    // matched or not, the reader has already linked it.
     if (isAlreadyLinked(start, endExclusive - 1)) {
       continue;
     }
 
     const candidates = [];
-    for (let c = 0; c < raw.refs.length; c++) {
-      const candidate = buildLinkerCandidate_(raw.refs[c], refData);
-      if (candidate) candidates.push(candidate);
-    }
-    if (!candidates.length) {
-      unresolvedCount++;
-      continue;
+    if (!linkFailed) {
+      for (let c = 0; c < raw.refs.length; c++) {
+        const candidate = buildLinkerCandidate_(raw.refs[c], refData);
+        if (candidate) candidates.push(candidate);
+      }
     }
 
     const documentText = docText.substring(start, endExclusive);
-    matches.push({
-      key: 'match-' + i + '-' + start,
+    const placement = {
       documentText: documentText,
       // Which occurrence of this exact text the citation is. Apply re-finds it
       // by this, not by raw offset, so an edit made while the review dialog
@@ -267,16 +493,306 @@ function classifyLinkerMatches_(input) {
       occurrence: countOccurrencesBefore_(docText, documentText, start),
       snippet: buildLinkerSnippet_(docText, start, endExclusive),
       startChar: start,
-      endChar: endExclusive,
+      endChar: endExclusive
+    };
+
+    if (!candidates.length) {
+      unmatched.push(placement);
+      continue;
+    }
+
+    matches.push(Object.assign({
+      key: 'match-' + i + '-' + start,
       ambiguous: candidates.length > 1,
       candidates: candidates
-    });
+    }, placement));
   }
 
   return {
     matches: matches,
-    unresolvedCount: unresolvedCount,
+    unmatched: unmatched,
+    unresolvedCount: unmatched.length,
     unplaceableCount: unplaceableCount
+  };
+}
+
+// How many unmatched citations one scan looks up again. Each costs up to one
+// request per spelling (buildReferenceVariants_), sent in parallel rounds; past
+// this a scan of a long, citation-heavy document would spend its time here.
+var LINKER_RETRY_MAX_CITATIONS_ = 30;
+
+/**
+ * Give each citation Sefaria's linker could not match the lookups the sidebar
+ * search would: every spelling buildReferenceVariants_ offers (the normalized
+ * form, the text as written, Hebrew numerals without their marks, traditional
+ * abbreviations expanded), each tried against the same texts API, in the same
+ * order, stopping at the first that resolves. A citation found this way becomes
+ * an ordinary single-source match; one that is not keeps the spellings tried
+ * and why it failed, for the review dialog's "Not matched" list.
+ *
+ * The close-match suggester ("did you mean…") is deliberately not used: it
+ * proposes a different work, which is a question for the reader, not a link.
+ *
+ * Sefaria's linker sometimes takes a label before a colon as part of the
+ * citation: "Duplicate A: Genesis 2:1" came back as one unmatched citation, and
+ * every spelling of it failed (BUG-010). When the words after the label carry a
+ * reference of their own, their spellings are tried too, after the citation's
+ * own; one that resolves is linked on those words alone, at their position.
+ *
+ * Never throws: when Sefaria cannot be reached, the citations still unchecked
+ * are reported as such and the scan's other results stand.
+ *
+ * @param {Array} unmatched  classifyLinkerMatches_'s `unmatched`
+ * @param {function(Array): Array} fetchAll  UrlFetchApp.fetchAll, injected for tests
+ * @param {string} [docText]  the scanned document text; without it no label is
+ *        split off (a narrowed citation needs its own occurrence and context)
+ * @returns {{recovered: Array, unmatched: Array}}
+ */
+function recoverUnmatchedCitations_(unmatched, fetchAll, docText) {
+  const items = (unmatched || []).map(function (entry, index) {
+    const variants = buildReferenceVariants_(entry.documentText).map(function (spelling) {
+      return { spelling: spelling, placement: null };
+    });
+    const narrowed = docText ? narrowLabelledCitation_(entry, docText) : null;
+    if (narrowed) {
+      buildReferenceVariants_(narrowed.documentText).forEach(function (spelling) {
+        if (!variants.some(function (v) { return v.spelling === spelling; })) {
+          variants.push({ spelling: spelling, placement: narrowed });
+        }
+      });
+    }
+    return {
+      entry: entry,
+      variants: variants,
+      checked: index < LINKER_RETRY_MAX_CITATIONS_,
+      tried: [],
+      attempts: [],
+      errors: [],
+      resolved: null,
+      variant: '',
+      placement: null,
+      unavailable: false
+    };
+  });
+
+  const longest = items.reduce(function (max, item) { return Math.max(max, item.variants.length); }, 0);
+  // One round per spelling, all citations at once, so spelling 1 is always
+  // tried before spelling 2 — the order the sidebar tries them in.
+  for (let round = 0; round < longest; round++) {
+    const batch = items.filter(function (item) {
+      return item.checked && !item.resolved && !item.unavailable && round < item.variants.length;
+    });
+    if (!batch.length) break;
+
+    // Ref metadata canonicalizes each spelling and bounds broad refs to one
+    // section before v3 fetches text. Structural headings need no text call.
+    // Keep the original indices: some citations fail metadata or are headings
+    // while their peers in the same round need a second, content-only batch.
+    const outcomes = resolveSefariaRefPlansBatch_(batch.map(function (item) {
+      return item.variants[round].spelling;
+    }), fetchAll);
+    const textPlans = [];
+    outcomes.forEach(function (plan, b) {
+      if (plan.textRef) {
+        textPlans.push({ index: b, ref: plan.textRef, indexTitle: plan.indexTitle });
+      }
+    });
+    if (textPlans.length) {
+      let textResponses;
+      try {
+        textResponses = fetchAll(textPlans.map(function (plan) {
+          return { url: sefariaTextsUrl_(plan.ref), muteHttpExceptions: true };
+        }));
+      } catch (error) {
+        textResponses = null;
+      }
+      textPlans.forEach(function (plan, t) {
+        outcomes[plan.index] = interpretTextsResponse_(
+          Array.isArray(textResponses) ? textResponses[t] : null, plan.ref, plan.indexTitle);
+      });
+    }
+
+    batch.forEach(function (item, b) {
+      const outcome = outcomes[b];
+      if (outcome.unavailable) {
+        item.unavailable = true;
+        return;
+      }
+      const variant = item.variants[round];
+      item.tried.push(variant.spelling);
+      if (outcome.resolved) {
+        item.resolved = outcome.resolved;
+        item.variant = variant.spelling;
+        item.placement = variant.placement;
+      } else {
+        // Each spelling's own answer: the row's one reason can only be the
+        // most telling of them (BUG-011: "book-name error" was shown for a
+        // citation whose expansions may have failed some other way).
+        item.attempts.push({ spelling: variant.spelling, error: outcome.error || '' });
+        if (outcome.error) item.errors.push(outcome.error);
+      }
+    });
+  }
+
+  const recovered = [];
+  const stillUnmatched = [];
+  items.forEach(function (item) {
+    const entry = item.entry;
+    if (item.resolved) {
+      // Found on the words after a label: those words are the citation.
+      const placement = item.placement ? Object.assign({}, entry, item.placement) : entry;
+      recovered.push(Object.assign({
+        key: 'recovered-' + placement.startChar,
+        ambiguous: false,
+        candidates: [buildLinkerCandidateFromText_(item.resolved)],
+        // The spelling that found it, shown under the source.
+        recoveredFrom: item.variant
+      }, placement));
+      return;
+    }
+    const reason = classifyUnmatchedCitation_(entry.documentText, item);
+    stillUnmatched.push(Object.assign({}, entry, {
+      variants: item.tried,
+      attempts: item.attempts,
+      reason: reason.code,
+      reasonText: reason.text,
+      detail: reason.detail
+    }));
+  });
+
+  return { recovered: recovered, unmatched: stillUnmatched };
+}
+
+// "Duplicate A: Genesis 2:1", "Source 1: בראשית ב:א": up to 40 characters of
+// label, a colon, a space, then a letter.
+var LINKER_CITATION_LABEL_RE_ = /^([^:\n]{1,40}?):\s+(?=[A-Za-z\u05D0-\u05EA])/;
+
+/**
+ * The citation inside an unmatched span that starts with a label, as a
+ * placement of its own ({documentText, startChar, endChar, occurrence,
+ * snippet}), or null. Only when the words after the label carry a reference's
+ * numbers themselves (lineLooksLikeReference_ without titles), so
+ * "Genesis 2: In the beginning" is never split into prose.
+ */
+function narrowLabelledCitation_(entry, docText) {
+  const text = String((entry && entry.documentText) || '');
+  const match = LINKER_CITATION_LABEL_RE_.exec(text);
+  if (!match) return null;
+  const rest = text.slice(match[0].length).replace(/\s+$/, '');
+  if (!rest || !lineLooksLikeReference_(rest, null)) return null;
+  const startChar = Number(entry.startChar) + match[0].length;
+  const endChar = startChar + rest.length;
+  if (docText.substring(startChar, endChar) !== rest) return null;
+  return {
+    documentText: rest,
+    startChar: startChar,
+    endChar: endChar,
+    occurrence: countOccurrencesBefore_(docText, rest, startChar),
+    snippet: buildLinkerSnippet_(docText, startChar, endChar)
+  };
+}
+
+/** One texts-API response as {resolved}, {error}, or {unavailable}. */
+function interpretTextsResponse_(response, expectedRef, expectedIndexTitle) {
+  if (!response) return { unavailable: true };
+  try {
+    const status = response.getResponseCode ? response.getResponseCode() : 200;
+    if (status === 429 || status >= 500) return { unavailable: true };
+    const data = parseJsonOrNull_(response.getContentText());
+    const apiError = (data && typeof data.error === 'string') ? data.error : '';
+    if (status >= 400 || apiError) return { error: apiError };
+    // Batch recovery bypasses fetchReference_, so it must normalize the v3
+    // payload too. A malformed successful response is an unavailable service,
+    // never evidence that the citation does not exist.
+    const resolved = normalizeSefariaV3TextResponse_(data);
+    if (!resolved || !resolved.ref ||
+        (expectedRef && resolved.ref !== expectedRef) ||
+        (expectedIndexTitle && resolved.indexTitle !== expectedIndexTitle)) {
+      return { unavailable: true };
+    }
+    return { resolved: resolved };
+  } catch (error) {
+    return { unavailable: true };
+  }
+}
+
+/** A review-table candidate from a texts-API payload, like buildLinkerCandidate_. */
+function buildLinkerCandidateFromText_(data) {
+  const english = htmlToPlainText_(firstTextSegment_(data.text), null);
+  const hebrew = htmlToPlainText_(firstTextSegment_(data.he), null);
+  return {
+    ref: String(data.ref || ''),
+    heRef: String(data.heRef || ''),
+    preview: truncateLinkerPreview_(english || hebrew, 220),
+    category: String(data.primary_category || '')
+  };
+}
+
+/** The first non-empty string in a (possibly nested) texts-API text array. */
+function firstTextSegment_(value) {
+  if (typeof value === 'string') return value;
+  if (!Array.isArray(value)) return '';
+  for (let i = 0; i < value.length; i++) {
+    const found = firstTextSegment_(value[i]);
+    if (found) return found;
+  }
+  return '';
+}
+
+// "Ibid.", "ad loc.", "Rashi there", "שם": a citation that points back at an
+// earlier one, which neither Sefaria's linker nor a lookup can follow.
+var LINKER_REFERS_BACK_RE_ = /(?:^|[\s(\[])(?:ibid|ib|id|op\.?\s*cit|loc\.?\s*cit|ad\s+loc|there)(?![A-Za-z])|(?:^|[\s(\[])שם(?![\u05D0-\u05EA])/i;
+
+/**
+ * Why a citation stayed unmatched, in words the reader can act on. `detail` is
+ * Sefaria's own message, when it gave one.
+ */
+function classifyUnmatchedCitation_(documentText, item) {
+  if (!item.checked) {
+    return {
+      code: 'not-checked',
+      text: 'Not looked up again: this scan had more than ' + LINKER_RETRY_MAX_CITATIONS_ + ' unmatched citations.',
+      detail: ''
+    };
+  }
+  if (item.unavailable) {
+    return {
+      code: 'unavailable',
+      text: 'Sefaria didn\u2019t answer while other spellings were being tried. Run Link Texts again.',
+      detail: ''
+    };
+  }
+  if (LINKER_REFERS_BACK_RE_.test(String(documentText || ''))) {
+    return {
+      code: 'refers-back',
+      text: 'Points back to an earlier citation (ibid., there, \u05E9\u05DD), which Sefaria can\u2019t follow. Write the source out in full.',
+      detail: ''
+    };
+  }
+  const errors = item.errors || [];
+  // A spelling that found the book but not the place says more than one that
+  // found nothing: "Hil. Shabbat 40:1" fails as written, but its expansion
+  // reaches Mishneh Torah and is told where it ends.
+  const outOfRange = errors.filter(function (e) { return /ends at|only has|out of range|exceed/i.test(e); })[0];
+  if (outOfRange) {
+    return {
+      code: 'out-of-range',
+      text: 'Sefaria knows the book, but not this chapter, verse or page.',
+      detail: outOfRange
+    };
+  }
+  const unknownTitle = errors.filter(function (e) { return /could not find title|unrecognized|not a valid|no index/i.test(e); })[0];
+  if (unknownTitle) {
+    return {
+      code: 'unknown-title',
+      text: 'Sefaria doesn\u2019t recognise the book name. Check the spelling, or write the title out in full.',
+      detail: unknownTitle
+    };
+  }
+  return {
+    code: 'not-found',
+    text: 'Sefaria couldn\u2019t match this to a source.',
+    detail: errors[0] || ''
   };
 }
 
@@ -296,18 +812,152 @@ function classifyLinkerMatches_(input) {
  *
  * @returns {Object} scan report; see linker-results.html for the consumer.
  */
-function scanDocumentForReferences() {
-  const bodyText = DocumentApp.getActiveDocument().getBody().editAsText();
-  const docText = bodyText.getText();
-  const prefs = getPreferences();
 
-  const scan = buildLinkerScanRequest_(docText, prefs);
+// Sefaria normally returns one row per occurrence, but a model can omit a
+// repeated citation. Recover only literal repetitions of a fully specified,
+// unambiguous citation independently verified by the context-free Ref API.
+// Never copy a resolution of "ibid.", a bare section number, or a spelling
+// which the model resolved differently elsewhere. Scan only the uploaded
+// segments (including selection scopes), never their omitted surroundings.
+var LINKER_REPEAT_MAX_SPELLINGS_ = 50;
+
+function linkerRepeatBoundary_(text, start, end) {
+  var before = text.slice(0, start);
+  var after = text.slice(end);
+  // Avoid substrings in larger words, numbers, ranges and commentary refs.
+  if (/[\p{L}\p{N}\p{M}_]$/u.test(before) || /^[\p{L}\p{N}\p{M}_]/u.test(after)) return false;
+  if (/[\p{L}\p{N}\p{M}][:.\/\-\u05BE\u2013\u2014]\s*$/u.test(before) ||
+      /^\s*[:.\/\-\u05BE\u2013\u2014]\s*[\p{N}\u05D0-\u05EA]/u.test(after)) return false;
+  // A bare base citation inside an otherwise unrecognized commentary title
+  // is not necessarily the same reference as the standalone spelling.
+  if (/(?:\bon|על|ל)\s+$/iu.test(before)) return false;
+  return true;
+}
+
+function recoverRepeatedLinkerMatches_(input, fetchAll) {
+  var docText = String(input.docText || '');
+  var scan = input.scan;
+  var raw = input.rawMatches || [];
+  var refData = input.refData || {};
+  var existing = input.existingMatches || [];
+  var occupied = [];
+  var seeds = new Map();
+
+  function remember(start, end, refs) {
+    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 ||
+        end <= start || end > docText.length) return;
+    occupied.push({ start: start, end: end });
+    var spelling = docText.slice(start, end).trim();
+    if (!spelling || spelling.length > 300 || /[\r\n]/.test(spelling)) return;
+    // Require a title and address, not only a number or context marker.
+    // The metadata check below also requires an actual nonempty address.
+    if (!/[\p{L}]/u.test(spelling) || !/\s/u.test(spelling)) return;
+    var unique = Array.from(new Set((refs || []).filter(Boolean)));
+    var seed = seeds.get(spelling);
+    if (!seed) {
+      seed = { spelling: spelling, ref: unique.length === 1 ? unique[0] : '', blocked: unique.length !== 1 };
+      seeds.set(spelling, seed);
+    } else if (unique.length !== 1 || unique[0] !== seed.ref) seed.blocked = true;
+  }
+  raw.forEach(function (item) {
+    if (!item) return;
+    var range = scan.segments ? mapPayloadRangeToDocRange_(scan.segments, Number(item.startChar), Number(item.endChar)) :
+      { startChar: Number(item.startChar), endChar: Number(item.endChar) };
+    if (range) remember(range.startChar, range.endChar,
+      !item.linkFailed && Array.isArray(item.refs) ? item.refs : []);
+  });
+  existing.forEach(function (item) {
+    // Existing recovered results also protect their actual span; the raw
+    // unresolved spelling above is deliberately not used as a repeat seed.
+    remember(item.startChar, item.endChar, (item.candidates || []).map(function (c) { return c.ref; }));
+  });
+
+  var segments = scan.segments || [{ docStart: 0, length: scan.payload.length }];
+  var pending = [];
+  seeds.forEach(function (seed) {
+    if (seed.blocked || pending.length >= LINKER_REPEAT_MAX_SPELLINGS_) return;
+    var spans = [];
+    segments.forEach(function (segment) {
+      var endOfSegment = segment.docStart + segment.length;
+      var at = segment.docStart;
+      while (at < endOfSegment) {
+        var start = docText.indexOf(seed.spelling, at);
+        if (start < 0 || start + seed.spelling.length > endOfSegment) break;
+        var end = start + seed.spelling.length;
+        at = end;
+        if (!linkerRepeatBoundary_(docText, start, end) ||
+            occupied.some(function (r) { return start < r.end && end > r.start; }) ||
+            (input.isAlreadyLinked && input.isAlreadyLinked(start, end - 1))) continue;
+        spans.push({ start: start, end: end });
+      }
+    });
+    if (spans.length) pending.push({ seed: seed, spans: spans });
+  });
+  if (!pending.length) return [];
+
+  // One metadata lookup per distinct spelling, not per occurrence. No
+  // fuzzy matching, variant expansion, context borrowing or whole-book
+  // padding. The verified canonical ref must agree with the original model.
+  var responses;
+  try {
+    responses = fetchAll(pending.map(function (item) {
+      return { url: sefariaRefUrl_(item.seed.spelling), muteHttpExceptions: true };
+    }));
+  } catch (error) { return []; }
+  if (!Array.isArray(responses)) return [];
+
+  var recovered = [];
+  pending.forEach(function (item, i) {
+    var response = responses[i], meta;
+    try {
+      if (!response || (response.getResponseCode && response.getResponseCode() >= 400)) return;
+      meta = parseJsonOrNull_(response.getContentText());
+    } catch (error) { return; }
+    if (!meta || meta.is_ref !== true || meta.normalized !== item.seed.ref ||
+        !Array.isArray(meta.start_labels) || !meta.start_labels.length) return;
+    var candidate = buildLinkerCandidate_(item.seed.ref, refData);
+    if (!candidate) return;
+    item.spans.forEach(function (span) {
+      if (occupied.some(function (r) { return span.start < r.end && span.end > r.start; })) return;
+      occupied.push(span);
+      recovered.push({
+        key: 'repeat-' + span.start + '-' + span.end,
+        documentText: item.seed.spelling,
+        startChar: span.start,
+        endChar: span.end,
+        occurrence: countOccurrencesBefore_(docText, item.seed.spelling, span.start),
+        snippet: buildLinkerSnippet_(docText, span.start, span.end),
+        ambiguous: false,
+        candidates: [candidate]
+      });
+    });
+  });
+  return recovered;
+}
+
+function scanDocumentForReferences(requestedScope) {
+  const doc = DocumentApp.getActiveDocument();
+  const bodyText = doc.getBody().editAsText();
+  const docText = bodyText.getText();
+  const scope = requestedScope || captureLinkerScope_(doc, false);
+  verifyLinkerScope_(scope, doc, docText);
+  let prefs;
+  try {
+    prefs = getPreferences();
+  } catch (error) {
+    throw linkerSettingsUnreadableError_(error);
+  }
+
+  const scan = buildScopedLinkerScan_(docText, prefs, scope);
+  const query = scope.selected && scope.insertIntent ? scope.ranges.map(function (range) { return docText.slice(range.start, range.end); }).join('\n').trim() : '';
   if (!scan) {
     return {
       matches: [],
+      unmatched: [],
       unresolvedCount: 0,
       unplaceableCount: 0,
-      reviewMode: getLinkerReviewMode_(prefs),
+      reviewMode: scope.insertIntent ? 'full' : getLinkerReviewMode_(prefs),
+      selected: scope.selected, insertIntent: scope.insertIntent, query: query,
       nothingToScan: true,
       scannedChars: 0,
       totalChars: docText.length
@@ -316,28 +966,86 @@ function scanDocumentForReferences() {
 
   const response = findRefsInDocumentText(scan.payload);
 
+  const rawMatches = Array.isArray(response.results) ? response.results : [];
+  const isAlreadyLinked = function (start, endInclusive) {
+    return !scope.insertIntent && !!(bodyText.getLinkUrl(start) || bodyText.getLinkUrl(endInclusive));
+  };
   const classified = classifyLinkerMatches_({
-    rawMatches: Array.isArray(response.results) ? response.results : [],
+    rawMatches: rawMatches,
     refData: response.refData || {},
     segments: scan.segments,
     docText: docText,
-    isAlreadyLinked: function (start, endInclusive) {
-      return !!(bodyText.getLinkUrl(start) || bodyText.getLinkUrl(endInclusive));
-    }
+    isAlreadyLinked: isAlreadyLinked
   });
-  const matches = classified.matches;
-  const unresolvedCount = classified.unresolvedCount;
+  // Look the unmatched ones up the way the sidebar search would.
+  const recovery = recoverUnmatchedCitations_(classified.unmatched, function (requests) {
+    return UrlFetchApp.fetchAll(requests);
+  }, docText);
+  const existingMatches = classified.matches.concat(recovery.recovered);
+  const repeated = recoverRepeatedLinkerMatches_({
+    docText: docText, scan: scan, rawMatches: rawMatches, refData: response.refData || {},
+    existingMatches: existingMatches, isAlreadyLinked: isAlreadyLinked
+  }, function (requests) { return UrlFetchApp.fetchAll(requests); });
+  // Keep each physical occurrence. A duplicate API row for the identical
+  // span is not another citation; preserve distinct offsets regardless of ref.
+  const bySpan = new Map();
+  existingMatches.concat(repeated).forEach(function (match) {
+    const key = match.startChar + ':' + match.endChar;
+    const prior = bySpan.get(key);
+    if (!prior) { bySpan.set(key, match); return; }
+    match.candidates.forEach(function (candidate) {
+      if (!prior.candidates.some(function (c) { return c.ref === candidate.ref; })) prior.candidates.push(candidate);
+    });
+    prior.ambiguous = prior.candidates.length > 1;
+  });
+  const matches = Array.from(bySpan.values())
+    .filter(function (match) { return !scope.selected || scope.ranges.some(function (range) { return match.startChar >= range.start && match.endChar <= range.end; }); })
+    .sort(function (a, b) { return a.startChar - b.startChar; });
+  // If the linker missed one whole selected reference, try the ordinary
+  // direct resolver as well. Close/fuzzy matches remain a user's choice in
+  // the prefilled Texts sidebar, never an automatic link.
+  if (scope.insertIntent && !matches.length && scope.ranges.length === 1 && query) {
+    try {
+      const resolved = findReference(query);
+      if (resolved && resolved.ref) {
+        const range = scope.ranges[0];
+        const start = range.start + docText.slice(range.start, range.end).indexOf(query);
+        matches.push({ key: 'selection-direct', ambiguous: false, candidates: [buildLinkerCandidateFromText_(resolved)],
+          documentText: query, startChar: start, endChar: start + query.length,
+          occurrence: countOccurrencesBefore_(docText, query, start), snippet: query });
+      }
+    } catch (error) { /* The reader can retry from the prefilled sidebar. */ }
+  }
+  matches.forEach(function (match) { scopedLinkerPlacement_(match, docText, scope); });
   const unplaceableCount = classified.unplaceableCount;
 
   return {
     matches: matches,
-    unresolvedCount: unresolvedCount,
+    unmatched: recovery.unmatched,
+    unresolvedCount: recovery.unmatched.length,
     unplaceableCount: unplaceableCount,
-    reviewMode: getLinkerReviewMode_(prefs),
+    reviewMode: scope.insertIntent ? 'full' : getLinkerReviewMode_(prefs),
+    selected: scope.selected, insertIntent: scope.insertIntent, query: query,
     nothingToScan: false,
     scannedChars: scan.scannedChars,
     totalChars: scan.totalChars
   };
+}
+
+/**
+ * The scan's error when Google's storage would not return the saved settings
+ * (BUG-012: "a server error occurred while reading from storage. Error code
+ * RESOURCE_EXHAUSTED"). The scan changes nothing, so that can be said; Google's
+ * own message is kept at the end for a support report. Not retried here: a
+ * storage service that is refusing reads is not helped by more of them.
+ */
+function linkerSettingsUnreadableError_(cause) {
+  const detail = String((cause && cause.message) || cause || '').trim();
+  return new Error(
+    'Google couldn’t read this add-on’s saved settings just now, so the document was not scanned and nothing in it was changed. ' +
+    'Wait a minute, then run Link Texts again.' +
+    (detail ? '\n\nGoogle’s message: ' + detail : '')
+  );
 }
 
 function getLinkerReviewMode_(prefs) {
@@ -411,7 +1119,8 @@ function applyLinkerDecisions(decisionsJson) {
     return { linked: 0, skipped: 0, missing: 0 };
   }
 
-  const bodyText = DocumentApp.getActiveDocument().getBody().editAsText();
+  const doc = DocumentApp.getActiveDocument();
+  const bodyText = doc.getBody().editAsText();
   const currentText = bodyText.getText();
 
   // Re-find every citation in the document as it is NOW. The offsets came
@@ -426,6 +1135,7 @@ function applyLinkerDecisions(decisionsJson) {
       skipped++;
       return;
     }
+    if (!linkerDecisionDocumentMatches_(doc, decision)) { missing++; return; }
     const range = relocateLinkerDecision_(currentText, decision);
     if (!range) {
       missing++;
@@ -485,8 +1195,20 @@ function nthOccurrence_(haystack, needle, n) {
  * which survives edits anywhere else in the document. Without them (an older
  * caller), the raw offsets are used only if they are in bounds.
  */
+function linkerDecisionDocumentMatches_(doc, decision) {
+  if (!decision || !decision.selectionPrefixHash) return true;
+  const identity = selectionDocumentIdentity_(doc);
+  return decision.selectionDocumentId === identity.documentId && decision.selectionTabId === identity.tabId;
+}
+
 function relocateLinkerDecision_(currentText, decision) {
   const text = String(currentText || '');
+  if (decision && decision.selectionPrefixHash) {
+    const start = Number(decision.startChar), end = Number(decision.endChar);
+    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end <= start || end > text.length ||
+        text.slice(start, end) !== decision.documentText || selectionTextHash_(text.slice(0, end)) !== decision.selectionPrefixHash) return null;
+    return { start: start, end: end };
+  }
   const needle = decision && typeof decision.documentText === 'string' ? decision.documentText : '';
   const occurrence = Number(decision && decision.occurrence);
   if (needle && isFinite(occurrence) && occurrence >= 0) {
@@ -503,40 +1225,26 @@ function relocateLinkerDecision_(currentText, decision) {
 
 function linkTextsWithSefaria() {
   const prefs = getPreferences();
-
-  if (!confirmLinkerUploadOnce_(String(prefs.linker_scan_mode || 'candidates'))) {
-    return;
-  }
-
-  // "quiet" keeps the published add-on's behaviour: link what is unambiguous,
-  // say how many, and do not interrupt. The only change is that the summary now
-  // reports what was skipped instead of staying silent about it.
-  if (getLinkerReviewMode_(prefs) === 'quiet') {
-    runQuietLinkPass_();
-    return;
-  }
-
-  // A template, not a plain file: it include()s the insertion options it
-  // shares with the sidebar's Layout tray.
-  const html = HtmlService.createTemplateFromFile('linker-results')
-    .evaluate()
-    .setWidth(760)
-    .setHeight(680);
-  DocumentApp.getUi().showModalDialog(html, 'Link Texts with Sefaria');
+  let scope;
+  try { scope = captureLinkerScope_(DocumentApp.getActiveDocument(), false); }
+  catch (error) { DocumentApp.getUi().alert(error.message); return; }
+  if (!confirmLinkerUploadOnce_(String(prefs.linker_scan_mode || 'candidates'), scope)) return;
+  if (getLinkerReviewMode_(prefs) === 'quiet') { runQuietLinkPass_(scope); return; }
+  openLinkerReview_(scope);
 }
 
-function runQuietLinkPass_() {
+function runQuietLinkPass_(scope) {
   const ui = DocumentApp.getUi();
   let report;
   try {
-    report = scanDocumentForReferences();
+    report = scanDocumentForReferences(scope);
   } catch (error) {
     ui.alert(error.message);
     return;
   }
 
   if (report.nothingToScan) {
-    ui.alert('No text in this document looks like a Sefaria reference, so nothing was sent to Sefaria. If you expected a match, switch "Document scanning" to "Whole document" in Preferences \u2192 Linking.');
+    ui.alert('No text in ' + (report.selected ? 'the selection' : 'this document') + ' looks like a Sefaria reference. To scan the whole document, clear the selection first.');
     return;
   }
 
@@ -552,6 +1260,9 @@ function runQuietLinkPass_() {
       endChar: match.endChar,
       documentText: match.documentText,
       occurrence: match.occurrence,
+      selectionPrefixHash: match.selectionPrefixHash,
+      selectionDocumentId: match.selectionDocumentId,
+      selectionTabId: match.selectionTabId,
       ref: match.candidates[0].ref
     });
   });
@@ -635,6 +1346,7 @@ function insertLinkedSourceAtPosition(ref, position, overrides) {
   const body = doc.getBody();
   const decision = (position && typeof position === 'object') ? position : { startChar: Number(position) };
 
+  if (!linkerDecisionDocumentMatches_(doc, decision)) return { success: false, ref: ref, reason: 'moved' };
   const found = findLinkerCitation_(body, decision);
   if (!found) {
     return { success: false, ref: ref, reason: 'moved' };
@@ -673,7 +1385,9 @@ var LINKER_INSERT_OVERRIDE_KEYS_ = {
   bilingual_layout_default: ['he-top', 'he-right', 'he-left'],
   bilingual_aligned_rows: 'boolean',
   source_emphasis_mode: ['keep', 'discard', 'only'],
+  source_notes_mode: ['omit', 'inline', 'separate'],
   transliteration_scheme: 'scheme',
+  transliteration_position: ['below', 'left', 'right'],
   nekudot: 'boolean',
   nekudot_filter: ['always', 'tanakh', 'false'],
   teamim: 'boolean',
@@ -795,6 +1509,7 @@ function findLinkerCitation_(body, decision) {
     element = element.getParent ? element.getParent() : null;
   }
   if (element) return { block: element, citation: needle, linked: linked };
+  if (decision.selectionPrefixHash) return null; // no guessing an anchor for a scoped decision
 
   // Fallback: the body child whose text span holds the offset (the previous
   // approach; a table here means "below the table").
@@ -826,7 +1541,9 @@ function buildLinkSourcesInsertOptions_(prefs) {
   const insertCitationOnly = prefs.insert_citation_default == 'true' || prefs.insert_citation_default === true;
   return {
     sourceEmphasisMode: prefs.source_emphasis_mode || undefined,
+    sourceNotesMode: normalizeSourceNotesMode_(prefs.source_notes_mode),
     transliterationScheme: prefs.transliteration_scheme || undefined,
+    transliterationPosition: prefs.transliteration_position || undefined,
     singleLanguage: singleLanguage,
     pasukPreference: pasukPreference,
     bilingualLayout: bilingualLayout,
@@ -879,62 +1596,19 @@ function unlinkSefariaSources() {
 }
 
 function insertSourceFromSelection() {
-  const ui = DocumentApp.getUi();
-  const doc = DocumentApp.getActiveDocument();
-  const selection = doc.getSelection();
-  if (!selection) {
-    ui.alert('Select some text first — the selection is used as the reference to look up.');
-    return;
-  }
+  let scope;
+  try { scope = captureLinkerScope_(DocumentApp.getActiveDocument(), true); }
+  catch (error) { DocumentApp.getUi().alert(error.message); return; }
+  if (!confirmLinkerUploadOnce_('full', scope)) return;
+  // Explicit insertion always reviews, even when Link Texts is set to quiet.
+  openLinkerReview_(scope);
+}
 
-  let selectedText = '';
-  const rangeElements = selection.getRangeElements();
-  for (let i = 0; i < rangeElements.length; i++) {
-    const re = rangeElements[i];
-    const el = re.getElement();
-    if (el.getType && el.getType() === DocumentApp.ElementType.TEXT) {
-      const textEl = el.asText();
-      if (re.isPartial()) {
-        selectedText += textEl.getText().substring(re.getStartOffset(), re.getEndOffsetInclusive() + 1);
-      } else {
-        selectedText += textEl.getText();
-      }
-    }
-  }
-  selectedText = String(selectedText || '').trim();
-  if (!selectedText) {
-    ui.alert('Selected text is empty — select a Sefaria reference like "Genesis 1:1" and try again.');
-    return;
-  }
-
-  let resolved;
-  try {
-    resolved = findReference(selectedText);
-  } catch (error) {
-    // findReference only throws when Sefaria could not be reached; the message says so.
-    ui.alert(error.message);
-    return;
-  }
-  if (!resolved || !resolved.ref) {
-    ui.alert(`No Sefaria source matched "${selectedText}".`);
-    return;
-  }
-
-  const prefs = getPreferences();
-  const insertOptions = buildLinkSourcesInsertOptions_(prefs);
-  // Replace the selected citation by default: the inserted source's title is
-  // that same text, so nothing is lost. Preferences -> Insertion -> Insert
-  // from Selection can switch this to keep the selection and insert below it.
-  const replaceSelection = insertReplacesSelection_(prefs);
-  let outcome;
-  try {
-    outcome = insertReference(resolved, Object.assign({ preferredTitle: selectedText, preserveSelection: !replaceSelection }, insertOptions));
-  } catch (error) {
-    ui.alert(`Failed to insert source: ${error.message}`);
-    return;
-  }
-  // The source went somewhere other than the selection (below a table): say so.
-  if (outcome && outcome.notice) {
-    ui.alert(outcome.notice);
-  }
+// A fuzzy or non-citation query belongs in the normal Texts search, where
+// the reader can choose from suggestions. Never auto-link a fuzzy result.
+function searchSelectedSources(query) {
+  const text = String(query || '').trim();
+  if (!text) return false;
+  openSharedSidebar_('texts', { initialQuery: text });
+  return true;
 }

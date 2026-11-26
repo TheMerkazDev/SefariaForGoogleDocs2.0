@@ -1,8 +1,11 @@
-# Torah Library Add-On for Google Docs
+# Sefaria for Google Docs
 
 A Google Docs add-on that brings Sefaria-powered source finding, previewing, insertion, linking, and formatting into Google Docs.
 
-> This is not an official Sefaria project.
+> This is version 2.0 of *Sefaria for Google Docs*, prepared for Sefaria to
+> publish through its existing Marketplace listing. It is a release candidate:
+> Sefaria has not yet approved or published it. See
+> [`docs/for-sefaria-review.md`](./docs/for-sefaria-review.md).
 
 ## Privacy
 
@@ -15,11 +18,12 @@ those requests carries your data.
 
 Read the full policy: **[`docs/PRIVACY.md`](./docs/PRIVACY.md)**.
 
-The one command that sends text you did not type is **Link Texts with Sefaria**,
-which uploads document text so Sefaria's reference linker can find citations in
-it. By default only the passages that look like they contain a citation are
-uploaded — see *Preferences → Linking → Privacy & Document Scanning*, and §2.1 of the
-policy.
+**Link Texts with Sefaria** sends text to Sefaria to detect citations. By
+default it sends candidate passages. **Insert Source from Selection**
+submits the selected text for reference detection. See *Preferences →
+Linking → Privacy & Document Scanning* and §2.1 of the policy.
+
+To report a security issue, see the [security policy](SECURITY.md).
 
 ## Contributing (human or AI)
 
@@ -48,7 +52,7 @@ See [docs/CHANGELOG.md](./docs/CHANGELOG.md) for a fuller summary of changes and
 
 ### Unified Find & Insert workflow
 
-The add-on centers on a unified sidebar that combines direct lookup and search into a single workflow; a **Texts** / **Voices** / **Lexicon** control under the search box re-runs the same search for texts, source sheets or dictionary entries:
+The add-on centers on a unified sidebar that combines direct lookup and search into a single workflow. Three tabs under the search box, **Texts** / **Voices** / **Lexicon**, search texts, source sheets or dictionary words; each keeps its own results and selection, typing searches the tab in view, and Enter searches the others too:
 
 1. find a source by reference, title, nested path, phrase, or Sefaria URL,
 2. select a result,
@@ -63,34 +67,55 @@ The sidebar groups results into:
 
 ### Display and layout controls
 
-The sidebar's **📰 Insertion Options** panel (the full-width button under
-**Add Source**) sets this session's insertion; **Preferences → Insertion** sets
-the defaults, and Link Texts' **📰 Customize this insertion** one linking pass.
-Its **Display** control has three modes:
+The sidebar's **📰 Insertion Options** panel (under **Add Source**) changes
+this sidebar session. **Preferences → Insertion** sets saved defaults, and
+Link Texts' **📰 Customize this insertion** applies to one linking pass.
 
-- **A** — translation only
-- **A + א** — Hebrew with translation
-- **א** — Hebrew only
+The primary controls stay outside the folded groups:
 
-For bilingual insertion, **Arrangement** offers:
+- **Display:** **Translation**, **Both**, or **Original**, with text labels
+  beside the A / A + א / א icons.
+- **Arrangement**, with Both: **Stacked**, **Hebrew right**, or **Hebrew left**.
+- **Line by line**, with Both: each verse beside its translation in its own
+  table row, or in Stacked, each verse followed by its translations.
+- **Transliteration**, when original text is included: turn it on to reveal
+  **Style**, and with side-by-side bilingual layouts, **Position** (Below,
+  Left, or Right of the Hebrew).
 
-- **Stacked** (Hebrew above the translation)
-- **Right–Left** (Hebrew on the right)
-- **Left–Right** (Hebrew on the left)
-
-with switches for **Citation**, **Line by line** (one table row per verse, for
-the side-by-side arrangements) and **Line numbers**.
+The Arrangement icons reflect the line and transliteration choices. Arrow
+keys select choices; the Style menu supports keyboard navigation and returns
+focus when dismissed.
 
 ### Hebrew and translation formatting controls
 
-The panel's **Insertion Format** card has a **Source** (Hebrew) section and a
-**Translation** section, each folding to a one-line summary. They hold:
+The sidebar starts with three folded groups. Their summaries show the current
+choices, and closing a group does not change settings or reload the passage.
 
-- **Link title to Sefaria**, **Title font** and **Text font** (each section its own),
-- **Vowels** (Off / Tanakh / On) and **Cantillation** (Off / Tanakh / Torah),
-- **Punctuation** (each section its own),
-- **Transliteration**, with its **Style**,
-- **Bold & italics** (Keep / Drop / Only) for the translation.
+| Group | Controls |
+| --- | --- |
+| **Text and notes** | Vowels, Cantillation, Hebrew punctuation, Translation punctuation, Commentary and Notes. |
+| **References and numbering** | Link source title, Link translation title, Citation and Line numbers. |
+| **Fonts and appearance** | Fonts and sizes for the source and translation titles and text. |
+
+**Commentary** offers Default / Combine / Drop: preserve the edition's
+markings, combine translation and explanation, or leave out recognized
+explanation. The William Davidson English Babylonian Talmud uses bold base
+text; Silverstein's Rashi Chumash and Rashi Ketuvim use bracketed additions.
+Other editions retain their words and source emphasis; a verse with malformed
+brackets stays whole.
+
+**Notes** separately controls marked footnotes in Hebrew and translation:
+**Omit** (the default), **Inline**, or **Separate**. Separate adds a labelled
+Notes text section below the passage or each aligned line; it does not create
+native Google Docs footnotes. Dropping commentary never removes a note
+requested with Inline or Separate.
+
+Preferences and Link Texts retain their detailed **Layout**, **Source** and
+**Translation** sections using the same controls. Simple and Everything keep
+the sidebar grouping. Controls hidden in **Preferences → Sidebar** remain
+hidden; their current values, including session overrides, continue to apply.
+**Revert** restores saved defaults, and **Save as defaults** keeps the current
+session choices for future sessions.
 
 Hebrew marks a chosen font lacks (often the cantillation) are set in Noto
 Serif / Sans Hebrew, so they never show as empty boxes.
@@ -99,13 +124,26 @@ Advanced source-edition/version controls remain available for cases where a spec
 
 ### Translation/version handling
 
-The add-on supports:
+Choose one translation or, with Translation only or Stacked, several in
+selection order. Changing Insertion Options keeps the selected translation,
+Hebrew edition and order. The preview waits for the matching text before
+insertion is enabled.
 
-- version-aware translation selection,
-- improved translation label handling,
-- translation filtering,
-- language-aware translation display labels,
-- optional translation details/attribution in inserted output.
+Passage content uses Sefaria Texts v3. The chosen edition supplies its own
+text: missing verses are not filled from a different edition under the same
+credit. A missing or mismatched edition needed for the chosen Display
+requires another choice.
+The edition list reflects Sefaria's catalog for the requested passage and
+may differ between passages. A book name opens a bounded first section;
+the preview title says which passage will be inserted.
+
+The preview uses the insertion rules for words, commentary and notes. It is
+not a complete rendering of a Google Docs page: generated line numbers,
+chapter headings, pagination and the final document font must be checked in
+the document. With several translations selected, it lists their names
+instead of rendering every translation. The
+[migration handoff](./docs/sefaria-api-migration.md) records API scope,
+deliberate behavior changes and pending live checks.
 
 ### Linking features
 
@@ -120,7 +158,14 @@ The add-on supports:
 New users get a short first-run setup and can pick **Simple** (search, preview,
 insert, with fewer tools in view and a shorter menu) or **Everything**.
 Existing users keep Everything. Switch at the top of Preferences; Simple hides
-with CSS only, so nothing is lost.
+with CSS only, so nothing is lost. In either one, **Preferences → Sidebar**
+leaves out the Voices or Lexicon tab, Quick Actions buttons and (Everything)
+Insertion Options controls. Explicitly disabled Voices and Lexicon stay off
+when switching interfaces. Everything also keeps **profiles**, named sets of
+how sources look (one per class). **Import/Export (⇅)** beside Interface is
+available in both modes: Simple uses the active preferences; Everything lets
+you choose a profile without switching to it. Shared account-wide settings
+are an explicit opt-in for named-profile transfers.
 
 ### Preferences
 
@@ -137,27 +182,49 @@ Persistent user preferences include:
 
 When a selected result is a non-leaf or structural node rather than directly insertable text, the sidebar now provides clearer guidance and keeps insertion disabled until a text-bearing node is selected.
 
+## Coming from version 1.0
+
+Most people arrive from version 1.0 of
+[*Sefaria for Google Docs*](https://workspace.google.com/marketplace/app/sefaria_for_google_docs/849562338091)
+([help](https://help.sefaria.org/hc/en-us/sections/20235182393244)): one
+sidebar (**Add Sources with Sefaria**) and two commands (**Transform Divine
+Names**, **Link Texts with Sefaria**), with format, edition and translation
+picked for each source and nothing saved. Version 2.0 replaces it in place;
+no settings carry over because 1.0 stored none. The same commands are under
+**Extensions → Sefaria for Google Docs** (Texts, and Quick Actions); what's new is saved defaults, layout and formatting choices,
+reviewed linking, and the Voices, Lexicon and Session Library tools. Two
+things work differently out of the box: divine names are replaced as sources
+are inserted (יהוה → יי), and each source gets a credit line. In-app Help has
+a *Coming from version 1.0* topic, and
+[walkthrough 4](./docs/walkthroughs/4-returning-user.md) is the demo script.
+
 ## What's new compared with the original add-on
 
-Torah Library builds on the original Sefaria add-on for Google Docs by Shlomi
-Helfgot (see [LICENSE.md](./LICENSE.md)) and substantially expands it, including:
+Version 2.0 builds on the original Sefaria add-on for Google Docs by Shlomi
+Helfgot (see [LICENSE.md](./LICENSE.md)), the code it grew from, and
+substantially expands it, including:
 
-- replacing the older split insertion/search flow with a unified sidebar,
-- improving search-result selection and preview behavior,
-- adding bilingual layout controls,
-- surfacing Vowels and Cantillation controls,
-- improving translation/version selection UX,
-- adding linking workflows,
-- adding typography preferences,
-- improving divine-name workflows,
-- improving structural-node guidance and preview clarity.
+- **Find and preview sources:** search by citation, phrase, title or Sefaria link in a unified sidebar; explore Texts, Voices (source sheets) and Lexicon (dictionary entries).
+- **Familiar first steps, more control when needed:** choose Simple or Everything. Display, Arrangement, Line by line and Transliteration are immediately accessible when applicable; other insertion choices fold into Text and notes, References and numbering, and Fonts and appearance.
+- **Your choices, remembered:** use saved defaults and profiles, or change insertion settings for the current sidebar session. Revert and Save as defaults wait for pending saves.
+- **Choose exact editions:** selected editions survive formatting changes. With Translation only or bilingual Stacked output, Ctrl/Cmd-click to pick individual translations or Shift-click for a range; insertion follows selection order. The preview lists multiple selections by name.
+- **Flexible source sheets:** insert original text, translation or both, side by side or stacked, with aligned verses, line numbers, transliteration and separate title links. Missing text keeps its place in aligned rows.
+- **Commentary and Notes:** Default, Combine and Drop recognize verified conventions in Davidson's English Talmud and Silverstein's Rashi Chumash and Rashi Ketuvim; unknown conventions preserve the words. Independently choose Omit (default), Inline or Separate for marked notes. Separate creates a Notes text section, not native Docs footnotes.
+- **Faithful retrieval and credits:** current Sefaria Texts v3 preserves the selected edition's identity and credits; partial editions retain their gaps instead of borrowing text from another edition. A requested language with no text cannot create an empty inserted block.
+- **Appearance and Hebrew text:** choose vowels, cantillation, punctuation, divine-name mappings, transliteration styles, typography and citation styling.
+- **Document tools:** link existing citations, insert from a selected citation, revisit sources in the Session Library, transform divine names, unlink sources and count gematriya.
+
+These are features of the **2.0.0 release candidate**. Live Google Docs
+verification and Marketplace publication are separate steps; see the
+[release checklist](./docs/live-test-checklist-2.0.0.md).
 
 See [docs/CHANGELOG.md](./docs/CHANGELOG.md) for a fuller summary of changes and [LICENSE.md](./LICENSE.md) for the repository license.
 
 ## Source attribution
 
 Each inserted source can carry a small credit block under it, and this is **on
-by default** (Preferences → Insertion, or the sidebar's details toggle). Many
+by default** (the **Citation** switch in 📰 Insertion Options → References and numbering, or Preferences →
+Insertion → Layout). Many
 Sefaria texts are CC-BY or CC-BY-NC, so the credit is what lets a user reuse
 them properly.
 
@@ -171,11 +238,11 @@ them properly.
 
 ## AI lesson generator (deferred)
 
-An AI-assisted lesson / shiur drafting feature was developed on the rewrite branch and **is not shipped in v1**. The design — including both the Merkaz-gateway route and a future Sefaria-hosted gateway recommendation — is preserved in [`docs/ai-lesson/DESIGN.md`](./docs/ai-lesson/DESIGN.md). The source files are preserved, not shipped, under [`reference/ai-lesson/`](./reference/ai-lesson/). If you are picking this up (including upstream Sefaria.org engineers), start with the design doc: it documents the trade-offs that kept the feature out of v1 and the checklist that any revival should work through.
+An AI-assisted lesson / shiur drafting feature was developed on the rewrite branch and **is not shipped in 2.0**. The design — including both the Merkaz-gateway route and a future Sefaria-hosted gateway recommendation — is preserved in [`docs/ai-lesson/DESIGN.md`](./docs/ai-lesson/DESIGN.md). The source files are preserved, not shipped, under [`reference/ai-lesson/`](./reference/ai-lesson/). If you are picking this up (including upstream Sefaria.org engineers), start with the design doc: it documents the trade-offs that kept the feature out of 2.0 and the checklist that any revival should work through.
 
 ## Menu actions
 
-The add-on menu (**Extensions → Torah Library**) includes, by default:
+The add-on menu (**Extensions → Sefaria for Google Docs**) includes, by default:
 
 - **Texts** — the unified search-and-insert sidebar.
 - **Voices** — source-sheet search with insert controls.
@@ -183,14 +250,14 @@ The add-on menu (**Extensions → Torah Library**) includes, by default:
 - **Insert Source from Selection** — look up the selected reference and insert it.
 - **Quick Actions** submenu — Quick Actions Sidebar, Transform Divine Names, Link Texts with Sefaria, Unlink Sources, Gematriya Count.
 - **Surprise Me** — preference-gated experimental feature (random-reference discovery).
-- **Preferences** and **Help & Support** — always last.
+- **Preferences** and **Help** — always last.
 
 Users can reorder, group and hide items in **Preferences → Menu Bar**.
 
 ## Demo and walkthrough
 
 - [Google Docs walkthrough](./docs/google-docs-walkthrough.md)
-- [Live walkthroughs](./docs/walkthroughs/README.md) — five scripts for live demos: a stress test, a developer tour, a power-user tour, a guide for users of the original add-on, and a five-minute first run.
+- [Live walkthroughs](./docs/walkthroughs/README.md) — five scripts for live demos: a stress test, a developer tour, a power-user tour, a guide for people coming from version 1.0, and a five-minute first run.
 
 
 ## Repository structure
@@ -202,7 +269,7 @@ Users can reorder, group and hide items in **Preferences → Menu Bar**.
 
 All Google Apps Script source files live under `apps-script/` (clasp rootDir):
 
-- `apps-script/server/*.gs` — server logic, one file per domain: `menu.gs` / `menu-layout.gs` (menu and dialogs), `sefaria-fetch.gs` and `search.gs` (Sefaria API), `insertion.gs` (writing sources into the document), `document-actions.gs` (linking, divine-name transforms, insert from selection), `linker-prefilter.gs` and `citation-abbreviations.gs` (linker support), `preferences.gs`, `text-processing.gs`, `sheets.gs`, `lexicon.gs`, `utils.gs`.
+- `apps-script/server/*.gs` — server logic, one file per domain: `menu.gs` / `menu-layout.gs` (menu and dialogs), `sefaria-fetch.gs` and `search.gs` (Sefaria API), `insertion.gs` (writing sources into the document) and `transliterated-title.gs` (the transliteration column's title), `document-actions.gs` (linking, divine-name transforms, insert from selection), `linker-prefilter.gs` and `citation-abbreviations.gs` (linker support), `preferences.gs`, `text-processing.gs`, `sheets.gs`, `lexicon.gs`, `utils.gs`.
 - `apps-script/triggers.gs` — the `onInstall` / `onOpen` simple triggers (kept at the root on purpose; see the file header).
 - `apps-script/appsscript.json` — Apps Script project manifest.
 - `apps-script/attribution.gs` — dual-mode (Apps Script + Node test) helper for translation/source attribution.
@@ -225,6 +292,7 @@ All Google Apps Script source files live under `apps-script/` (clasp rootDir):
 - `docs/google-docs-walkthrough.md` - End-user walkthrough for the current unified workflow.
 - `docs/PRIVACY.md`, `docs/TERMS.md` - Privacy policy and terms of service.
 - `docs/marketplace-listing.md` - Google Workspace Marketplace console package and release procedure.
+- `docs/for-sefaria-review.md` - For Sefaria: review notes, and what is left to publish it under Sefaria's name.
 - `docs/architecture.md`, `docs/regression-log.md`, `docs/versioning.md` - For contributors.
 
 ### Tests
@@ -295,6 +363,11 @@ For formatting or insertion changes, include before/after examples or screenshot
 
 The source code in this repository is licensed under the [MIT License](./LICENSE.md).
 
-This project uses the Sefaria API but is not an official Sefaria project.
+This repository is a release candidate offered to Sefaria; it is an official
+Sefaria release only once Sefaria publishes it.
 Texts and metadata retrieved from Sefaria may carry separate attribution,
 copyright, or reuse terms depending on the source text.
+
+### Selection actions and setup
+
+Insert Source from Selection reviews the highlighted citations independently of quiet linking preferences. Link Texts and Gematriya Count limit their work to highlighted text; clear the selection for document-body scope. The one-step 1.0 preset uses the familiar bilingual layout, quiet linking and Add Sources with Sefaria (Voices and Lexicon off). Other setup paths expose both optional search tools. Help → Re-run Setup Wizard offers keeping or resetting active preferences; named profile snapshots remain.

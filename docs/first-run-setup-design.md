@@ -1,7 +1,7 @@
 # First-Run Setup and Simple Mode: Design
 
 > **Status:** Implemented (steps 1–4 of §13). Release (step 5) pending.
-> **Target release:** 2.2.0 (MINOR: new preference keys, handled by a migration)
+> **Target release:** 2.0.0, the first Marketplace release
 >
 > Where the implementation differs from the first draft, the text below says
 > what was built and why; §14 lists the differences in one place.
@@ -70,7 +70,13 @@ stored flag, checked on first use.
 | New, installed from inside a document | `onInstall` fires; no schema stored | Yes, straight after install (replaces the Release Notes dialog) | Chosen in setup |
 | New, installed from the Marketplace website or by an admin | No schema stored at first open | Yes, the first time they open the sidebar | Chosen in setup |
 | Upgrader from the current add-on (schema 1–19) | Schema stored | **No** | Full, set by migration |
-| Legacy user of the original published add-on | No schema stored (that add-on stored no preferences), so indistinguishable from a new user | Yes; screen 1 offers "I've used Torah Library before: keep everything" | Chosen in setup; dismissing keeps Full |
+| Someone coming from Sefaria for Google Docs | A separate add-on with separate storage, which stores no preferences anyway: no schema stored, so a new user here | Yes; screen 1 has "I've used Sefaria for Google Docs" | Chosen in setup; dismissing keeps Full |
+| Legacy user of the original published add-on | No schema stored (that add-on stored no preferences), so indistinguishable from a new user | Yes; as a new user (no settings to keep, so no "Keep my settings") | Chosen in setup; dismissing keeps Full |
+
+Help's *Coming from Sefaria for Google Docs* topic and walkthrough 4 are for
+the first of those two rows: where that add-on's three commands went, and what
+works differently (divine names replaced on insert, the credit line, reviewed
+linking).
 
 The last row is why **the code default for the interface mode is Full, not
 Simple.** Legacy users look exactly like new ones, so nobody can be put into
@@ -92,8 +98,9 @@ existing user had is the regression this project has already paid for.)
   Full mode and changes nothing. It never reappears by itself. Google's dialog
   close button gives the page no callback, so setup is marked done **as soon as
   it is shown** (`maybeShowFirstRunSetup_`) rather than when it is dismissed.
-- **Help → "Run setup again"** reopens it at any time, preselected with the
-  user's current values.
+- **Help → Re-run Setup Wizard** reopens it with Keep Current Preferences or
+  Reset to Add-on Defaults. Reset changes active settings only, retaining named
+  profile snapshots and the upload acknowledgement.
 
 ---
 
@@ -117,9 +124,19 @@ One choice, large cards with an icon and one line each:
 | **Quoting sources in my writing** | Divrei Torah, sermons, newsletters, emails |
 | **Preparing source sheets** | Classes, shiurim, study partners |
 | **Academic writing** | Papers, articles, books with citations |
-| **I've used Torah Library before** | Keep everything as it is |
+| **I've used Sefaria for Google Docs 1.0** | Continue applies the familiar preset immediately; no further customization screens |
+| **Keep my settings** *(only with settings to keep)* | I've set up Torah Library before; change nothing |
 
-The last card skips to the done screen with Full mode and no changes.
+**Keep my settings** skips to the done screen with no changes. It is hidden
+unless the person has settings of their own (`hasSavedSettings`, from
+`firstRunHasSavedSettings_` in `server/first-run.gs`): setup was finished or
+dismissed before (Help → Run setup again), or a stored setting differs from
+its default. At install nobody has any (onInstall seeds the defaults, and
+Sefaria for Google Docs stores none), so a first run never offers it. It
+replaced "I've used Torah Library before" on screen 1 (2026-11), which no one
+installing could truthfully pick. A future upgrade that wants to show setup
+to existing users again sets `first_run_setup` back to `pending` in a
+migration; their own settings make the card appear.
 
 The other answers only change which answers are **preselected** on screens 2
 and 3 (see §5). They write nothing on their own.
@@ -160,7 +177,7 @@ Two cards, each with a small screenshot of the sidebar in that mode:
 - **Everything:** "Every tool and setting, including Link Texts, Voices and
   Lexicon."
 
-→ `ui_mode` (`simple` / `full`). Preselected from screen 1 (§5).
+→ `ui_mode` (`simple` / `full`). Preselected from screen 1 (§5). Independent Voices and Lexicon checkboxes are available on ordinary paths; neither is forced on by Everything.
 
 ### Done screen
 
@@ -177,15 +194,17 @@ And one button: **Start** (closes the dialog and focuses the sidebar's search).
 
 ## 5. What each answer preselects
 
-Screen 1 changes only the preselected answers on screens 2 and 3. The user sees
-and can change every one of them before anything is saved.
+For ordinary paths, screen 1 proposes answers on screens 2 and 3. The legacy
+1.0 choice is the exception: Continue applies the preset and closes setup.
+Keep Current Preferences on rerun prevents purpose-based overrides.
 
 | Screen 1 answer | Screen 2 preselection | Screen 3 preselection |
 | --- | --- | --- |
 | Quoting sources in my writing | Current defaults, except **Arrangement: Hebrew above** (`he-top`), which pastes more cleanly into prose and email | Simple |
 | Preparing source sheets | Current defaults (side by side, Hebrew on the right) | Simple |
 | Academic writing | Current defaults | Everything |
-| I've used Torah Library before | (screens skipped) | Full, no changes |
+| I've used Sefaria for Google Docs 1.0 | Skipped: applies familiar active defaults immediately, including bilingual Hebrew-right, automatic divine-name substitution off and quiet linking | Simple; Voices/Lexicon off |
+| Keep my settings (only with settings to keep) | (screens skipped) | No changes |
 
 The "quoting" preset's move to `he-top` is the only place a preset differs
 from today's defaults. A preset never overrides a field the user already
@@ -239,7 +258,7 @@ The customizable menu already has this limitation; Simple mode inherits it.
 | Search box, Hebrew keyboard, recent sources, results, source card | Shown | Shown |
 | **Insert** button | Shown | Shown |
 | Translation language filter (`#translation-language-dropdown`) | Shown | Shown |
-| Texts / Voices / Lexicon tabs (under the search box) | Hidden; sidebar opens in Texts | Shown |
+| Texts / Voices / Lexicon tabs (under the search box) | Shown (Voices and Lexicon each switchable in Preferences → Sidebar; see below) | Shown (same switches) |
 | Sort (`#search-sort-mode`), Restore corpus menu | Hidden | Shown |
 | **Insertion Options** button (under Add Source) and its panel | Shown | Shown |
 | Footer: Session Library, Quick Actions panel, Preferences | Shown | Shown |
@@ -247,10 +266,30 @@ The customizable menu already has this limitation; Simple mode inherits it.
 | Experimental (🧪) | Hidden | As today (off unless enabled) |
 
 There is no "More options" disclosure (removed in 2026-10 at the owner's
-request): what Simple mode hides (the result sort, Restore Corpus, and the
-tabs while in Texts) comes back with Preferences → Interface → Everything. If
-a search is run from Voices or Lexicon through a menu item a Simple user
-re-enabled, the sidebar opens in that mode and shows the tabs.
+request): what Simple mode hides (the result sort and Restore Corpus) comes
+back with Preferences → Interface → Everything.
+
+**Preferences → Sidebar (schema v29, 2026-11).** Simple mode first hid the
+Texts / Voices / Lexicon tabs while in Texts (decision 3 in §12). At the
+owner's request they now show in both interfaces, and a *Sidebar* tab in
+Preferences (both interfaces, saved with Save) chooses what the sidebar
+shows: the Voices and Lexicon tabs (`show_voices_tab`, `show_lexicon_tab`;
+Texts has none), the Quick Actions buttons (`sidebar_quick_actions_hidden`)
+and, in Everything, the Insertion Options controls (`sidebar_options_hidden`;
+a hidden one uses the saved default). Everything defaults to shown, and
+`migrateToV29_` stores that for every upgrader (hard rule 2). The sidebar
+hides by CSS only (`css/components/sidebar-controls`), from attributes on its
+root that `openSharedSidebar_` prints, so nothing switched off is painted,
+and `syncSidebarControls` updates after a save. A switched-off tab still
+shows while it is the open one (its menu item can open it); the sidebar
+never reopens on one by itself (`resolveSidebarOpenMode_`). With both tabs
+off the bar goes, unless 🧪 sits beside Texts (Everything only); with all
+three Quick Actions off, 🏃 goes and its row closes up. A switched-off tab
+also takes its *Insertion Defaults* sub-tab in Preferences with it. The
+menu is separate: Menu Bar arranges it.
+
+Everything also has **settings profiles** beside the Preferences tabs
+(`server/settings-profiles.gs`; see `docs/architecture.md`, Storage layers).
 
 Implementation: a `data-ui-mode="simple"` attribute on the sidebar root, with CSS
 in the sidebar's own stylesheet. **Hidden by CSS only**, never removed from the
@@ -261,18 +300,25 @@ modes.
 
 | Tab | Simple | Full |
 | --- | --- | --- |
-| Fonts | Shown | Shown |
 | Insertion | Shown | Shown |
-| Search | Behind "Show advanced settings" | Shown |
-| Linking | Behind "Show advanced settings" | Shown |
+| Search | Hidden | Shown |
+| Linking | Hidden | Shown |
 | Menu Bar | Shown | Shown |
-| Experimental | Behind "Show advanced settings" | As today |
+| ⇅ Import/Export (modal beside Interface) | Current preferences | Select a profile; optional shared settings |
+| Experimental | Hidden | As today |
 
-Inside the Fonts tab, the per-language translation typography and the
-emphasis-mapping sections collapse behind the same switch.
+Inside the Insertion tab's card, the per-language translation typography and
+the emphasis-mapping sections are hidden too. (There was a Fonts tab when this
+was written; its settings now sit beside what they style.)
 
-"Show advanced settings" is a switch at the bottom of the tab bar. It reveals the
-tabs for this dialog session only; it does not change `ui_mode`.
+The Interface switch is the only control for this. A "Show advanced settings"
+switch used to reveal the hidden tabs for one dialog session without changing
+`ui_mode`; it did what switching to Everything does, so it was removed
+(2026-11). A link straight to a hidden tab (`PREF_NAVIGATE_TAB`) still shows
+the hidden tabs for that dialog only. Switching keeps unsaved values and
+unsaved Menu Bar edits, and reaches an open sidebar through `localStorage`
+(`sefariaUiMode`) instead of asking for a refresh, which cleared the sidebar's
+session settings.
 
 ---
 
@@ -341,7 +387,7 @@ Per `docs/versioning.md` §2, in a single commit:
 - a CHANGELOG entry under **Unreleased** that says, first sentence: existing
   users keep the full interface and never see setup.
 
-The add-on version itself (2.2.0, and the surfaces `VERSION.json` lists) moves
+The add-on version itself (2.0.0, and the surfaces `VERSION.json` lists) moves
 at release, as for schemas 17–19: `versioning.md` §5 keeps version bumps out of
 feature commits.
 
@@ -412,7 +458,10 @@ New tests in `test/tests/`:
     unknown keys and invalid values.
   - Clicking through with the preselected answers writes no content key whose
     value differs from what is stored.
-  - "I've used Torah Library before" writes only `first_run_setup = done`.
+  - "Keep my settings" writes only `first_run_setup = done`, and is offered
+    only to someone with settings to keep (`firstRunHasSavedSettings_`);
+    "I've used Sefaria for Google Docs" presets both languages, Hebrew on
+    the right, and Simple.
   - Showing setup marks it done; it is never shown to an upgrader.
   - The preview's client-side vowel, trope and divine-name rules give the same
     text as `text-processing.gs` for the Deuteronomy 6:4 sample.
@@ -459,7 +508,7 @@ pattern, so its migration test cites that row.
   Sefaria?" with **Show me** (opens Link Texts) and **Don't show tips**. Shown
   once. Counting inserts across sessions needs a stored counter, which means
   another preference key, migration and schema bump. So the tip is out of scope
-  for 2.2.0 and listed in §12.
+  for 2.0.0 and listed in §12.
 
 `docs/marketplace-listing.md` and the store screenshots are updated in the
 release that ships this, not before.
@@ -474,8 +523,9 @@ approved:
 1. **The `he-top` preset for the "quoting" answer** (§5): kept.
 2. **A new user who dismisses setup** keeps Full: a legacy user of the original
    add-on cannot be told apart from a new one. Revisit with feedback.
-3. **Voices and Lexicon in Simple mode:** the tabs are hidden in Texts for
-   every Simple user.
+3. **Voices and Lexicon in Simple mode:** the tabs were hidden in Texts for
+   every Simple user. Superseded in schema v29: they show in both interfaces,
+   each with its own switch (§6, *Sidebar tabs*).
 4. **The graduation tip** (§11): deferred to a later release.
 
 ---
@@ -492,8 +542,9 @@ green.
 3. **Setup dialog:** the entry template, preview and tests.
 4. **Simple mode:** sidebar and Preferences CSS, the Interface switch, menu
    save and restore, snapshots.
-5. **Release:** CHANGELOG, `docs/live-test-checklist-2.2.0.md` (fresh install
-   from inside a document, from the Marketplace website, an upgrade from 2.1.0,
+5. **Release:** CHANGELOG, `docs/live-test-checklist-2.0.0.md` (fresh install
+   from inside a document, from the Marketplace website, an upgrade from a
+   development build,
    and a no-schema legacy user), listing and screenshots.
 
 ---
@@ -508,4 +559,12 @@ green.
   bootstrap field (§8).
 - A menu rearranged in Simple mode is kept on switching back, with a note,
   instead of a question (§6).
-- The version bump to 2.2.0 waits for the release (§7).
+- The version number (2.0.0) is set at the release (§7).
+
+## Launch follow-up: legacy preset and explicit rerun
+
+The version 1.0 choice now applies the documented familiar layout/menu and quiet linking in one step. Automatic divine-name substitution is off; current attribution and privacy safeguards are retained. Both optional tools are disabled and the Texts menu is Add Sources with Sefaria. Other paths expose Voices and Lexicon checkboxes independently. The rerun entry opens a keep/reset choice first. Keep preselects the current values without purpose-based overrides; Reset writes canonical active defaults, preserving named profile snapshots and the upload acknowledgement. No preference changes occur until the restart choice is confirmed. The former three-screen legacy description above is historical.
+
+### Preferences follow-up
+
+The mode switch is not Reset: explicitly disabled Voices/Lexicon are unavailable in the menu and its editor in either mode. The client updates the menu baseline separately so mode-driven menu changes do not mark unrelated unsaved edits as saved. Import/Export is a modal in both modes; named-profile transfers address snapshots without activating them. Shared settings are opt-in in Everything, and an import does not switch interface mode.
