@@ -11,35 +11,34 @@ function enabledDivineNameRules_(prefs) {
     { on: p.meforash_replace, name: 'יהוה', replacement: p.meforash_replacement || 'יי' },
     { on: p.yaw_replace, name: 'יה', replacement: p.yaw_replacement || 'קה' },
     { on: p.elodim_replace, name: 'אלהים / אלוהים', replacement: p.elodim_replacement || 'אלוקים' },
-    { on: p.god_replace, name: 'God', replacement: p.god_replacement || 'G-d' }
+    { on: p.god_replace, name: 'God', ltr: true, replacement: p.god_replacement || 'G-d' }
   ].filter(function (rule) { return rule.on == 'true'; })
-    .map(function (rule) { return { name: rule.name, replacement: String(rule.replacement) }; });
+    .map(function (rule) { return { name: rule.name, replacement: String(rule.replacement), ltr: !!rule.ltr }; });
 }
 
-/**
- * What Transform Divine Names is about to change, asked before it changes it.
- * It edits every match in the body of the open tab: a selection does not limit
- * it, and headers, footers, footnotes and other tabs are left alone. Nothing
- * said so; Preferences called it "document-wide", and a tutorial promised that
- * unselected text would be kept (BUG-006). The scope is unchanged; it is stated.
- */
-function divineNameTransformPrompt_(rules, hasSelection) {
-  return 'This replaces every match in the body of the tab you have open \u2014 the whole tab, not only selected text. ' +
-    'Headers, footers, footnotes and other tabs are not changed.' +
-    (hasSelection ? '\n\nYou have text selected: the selection does not limit what is replaced.' : '') +
+/** Name the same scope in confirmation and in the result. */
+function divineNameTransformPrompt_(rules, scope) {
+  return 'This replaces matching divine names in ' + scope + '. ' +
+    'Headers, footers, footnotes and other tabs stay unchanged.' +
     '\n\nRules turned on (Preferences \u2192 Divine Name Mappings):\n' +
-    rules.map(function (rule) { return '    ' + rule.name + '  \u2192  ' + rule.replacement; }).join('\n') +
+    rules.map(function (rule) {
+      // Docs alerts are plain text. Pin the visual order with a left-to-right
+      // isolate, then isolate each name so its own characters read naturally.
+      const replacement = '\u2068' + rule.replacement + '\u2069';
+      const line = rule.ltr
+        ? rule.name + '  \u2192  ' + replacement
+        : replacement + '  \u2190  \u2067' + rule.name + '\u2069';
+      return '    \u2066' + line + '\u2069';
+    }).join('\n') +
     '\n\nEdit \u2192 Undo reverses it. Continue?';
 }
 
-function divineNameTransformSummary_(count) {
-  if (!count) return 'No divine names matching your rules were found in this tab\u2019s body. Nothing was changed.';
-  return 'Replaced ' + count + ' divine name' + (count === 1 ? '' : 's') + ' in this tab\u2019s body.';
+function divineNameTransformSummary_(count, scope) {
+  if (!count) return 'No divine names matching your rules were found in ' + scope + '. Nothing was changed.';
+  return 'Replaced ' + count + ' divine name' + (count === 1 ? '' : 's') + ' in ' + scope + '.';
 }
 
 function transformDivineNames() {
-  const doc = DocumentApp.getActiveDocument();
-  const body = doc.getBody();
   const prefs = getPreferences();
   const ui = DocumentApp.getUi();
   const rules = enabledDivineNameRules_(prefs);
@@ -47,32 +46,99 @@ function transformDivineNames() {
     ui.alert('No divine-name transforms are enabled. Open Preferences and enable at least one transform before running this action.');
     return;
   }
-  let hasSelection = false;
-  try { hasSelection = !!(doc.getSelection && doc.getSelection()); } catch (e) { hasSelection = false; }
-  if (ui.alert('Transform Divine Names', divineNameTransformPrompt_(rules, hasSelection), ui.ButtonSet.YES_NO) !== ui.Button.YES) {
+
+  const doc = DocumentApp.getActiveDocument();
+  const identity = selectionDocumentIdentity_(doc);
+  let selection;
+  let selectedBodyText;
+  const selectedTargets = new Map();
+  try {
+    selection = doc.getSelection ? doc.getSelection() : null;
+    if (selection) {
+      const pieces = selectedTextPieces_(selection);
+      if (!pieces.length) throw new Error('Select text in the body of this tab, or clear the selection to transform the whole body.');
+      pieces.forEach(function (piece) {
+        const path = selectionBodyPath_(piece.element);
+        if (path === null) throw new Error('Select text in the body of this tab. Headers, footers and footnotes are outside this command’s scope.');
+        if (!selectedTargets.has(path)) selectedTargets.set(path, { source: piece.text, spans: [] });
+        selectedTargets.get(path).spans.push({ start: piece.start, end: piece.end });
+      });
+      selectedBodyText = doc.getBody().getText();
+    }
+  } catch (error) {
+    ui.alert('Could not use the selection. ' + error.message + ' Nothing was changed.');
     return;
   }
+
+  const scope = selection ? 'the selected text in this tab' : 'the whole body of this tab';
+  if (ui.alert('Transform Divine Names', divineNameTransformPrompt_(rules, scope), ui.ButtonSet.YES_NO) !== ui.Button.YES) {
+    return;
+  }
+
+  // An Apps Script alert suspends execution. Reopen the active body and
+  // resolve captured paths before editing so a changed selection cannot widen
+  // the scope or send an offset into a different paragraph.
+  const targets = [];
+  try {
+    const active = DocumentApp.getActiveDocument();
+    const current = selectionDocumentIdentity_(active);
+    const body = active.getBody();
+    if (identity.documentId !== current.documentId || identity.tabId !== current.tabId ||
+        (selection && selectedBodyText !== body.getText())) {
+      throw new Error('The document, tab or text changed.');
+    }
+    if (selection) {
+      selectedTargets.forEach(function (target, path) {
+        const leaf = path.split('/').reduce(function (node, index) { return node.getChild(Number(index)); }, body);
+        if (leaf.getType() !== DocumentApp.ElementType.TEXT || leaf.asText().getText() !== target.source) {
+          throw new Error('The selected text changed.');
+        }
+        const spans = [];
+        target.spans.sort(function (a, b) { return a.start - b.start; }).forEach(function (span) {
+          const last = spans[spans.length - 1];
+          if (last && span.start <= last.end) last.end = Math.max(last.end, span.end);
+          else spans.push(span);
+        });
+        targets.push({ textElement: leaf.asText(), spans });
+      });
+    } else {
+      walkSelectionTextLeaves_(body, function (leaf) { targets.push({ textElement: leaf.asText() }); });
+    }
+  } catch (error) {
+    ui.alert('Could not verify the confirmed scope. Run the command again. Nothing was changed.');
+    return;
+  }
+
   let replacedCount = 0;
   // A name's letters and their marks (HEBREW_LETTER_MARKS_). Maqaf, paseq and
   // sof pasuq end a word: a name before one is matched and the mark kept.
   const hebrewMarks = HEBREW_LETTER_MARKS_;
   const hebrewChars = hebrewMarks + "\\u05D0-\\u05EA";
-  const replaceRangesInTextElement = (textElement, ranges) => {
-    if (!ranges || !ranges.length) {
-      return;
-    }
-    replacedCount += ranges.length;
+  const replaceRangesInTextElement = (target, ranges) => {
+    const { textElement, spans } = target;
 
     for (let i = ranges.length - 1; i >= 0; i--) {
       const range = ranges[i];
       const start = range.start;
       const end = range.end;
       const replacement = range.replacement;
+      if (spans && !spans.some(span => start >= span.start && end < span.end)) continue;
       const originalAttributes = textElement.getAttributes(start);
       const originalLink = textElement.getLinkUrl(start);
 
       textElement.deleteText(start, end);
       textElement.insertText(start, replacement);
+
+      replacedCount++;
+      // Later rules read the edited text. Keep all selection offsets aligned
+      // when a replacement changes the length of this text element.
+      if (spans) {
+        const delta = replacement.length - (end - start + 1);
+        spans.forEach(function (span) {
+          if (span.start > end) span.start += delta;
+          if (span.end > end) span.end += delta;
+        });
+      }
 
       if (replacement.length > 0) {
         const replacementEnd = start + replacement.length - 1;
@@ -82,8 +148,8 @@ function transformDivineNames() {
     }
   };
 
-  const replaceHebrewWordInTextElement = (textElement, tokenPattern, replacement) => {
-    const source = textElement.getText();
+  const replaceHebrewWordInTextElement = (target, tokenPattern, replacement) => {
+    const source = target.textElement.getText();
     if (!source) {
       return;
     }
@@ -102,11 +168,11 @@ function transformDivineNames() {
       }
     }
 
-    replaceRangesInTextElement(textElement, ranges);
+    replaceRangesInTextElement(target, ranges);
   };
 
-  const replaceRegexInTextElement = (textElement, regex, replacement) => {
-    const source = textElement.getText();
+  const replaceRegexInTextElement = (target, regex, replacement) => {
+    const source = target.textElement.getText();
     if (!source) {
       return;
     }
@@ -121,51 +187,28 @@ function transformDivineNames() {
       });
     }
 
-    replaceRangesInTextElement(textElement, ranges);
+    replaceRangesInTextElement(target, ranges);
   };
 
-  const collectTextElements = (element, textElements) => {
-    if (!element) {
-      return;
-    }
-
-    if (element.getType && element.getType() === DocumentApp.ElementType.TEXT) {
-      textElements.push(element.asText());
-      return;
-    }
-
-    if (!element.getNumChildren) {
-      return;
-    }
-
-    const count = element.getNumChildren();
-    for (let i = 0; i < count; i++) {
-      collectTextElements(element.getChild(i), textElements);
-    }
-  };
-
-  const textElements = [];
-  collectTextElements(body, textElements);
-
-  textElements.forEach((textElement) => {
+  targets.forEach((target) => {
     if (prefs.meforash_replace == "true") {
-      replaceHebrewWordInTextElement(textElement, `י[${hebrewMarks}]*ה[${hebrewMarks}]*ו[${hebrewMarks}]*ה[${hebrewMarks}]*`, prefs.meforash_replacement || "יי");
+      replaceHebrewWordInTextElement(target, `י[${hebrewMarks}]*ה[${hebrewMarks}]*ו[${hebrewMarks}]*ה[${hebrewMarks}]*`, prefs.meforash_replacement || "יי");
     }
     if (prefs.yaw_replace == "true") {
-      replaceHebrewWordInTextElement(textElement, `י[${hebrewMarks}]*ה[${hebrewMarks}]*`, prefs.yaw_replacement || "קה");
+      replaceHebrewWordInTextElement(target, `י[${hebrewMarks}]*ה[${hebrewMarks}]*`, prefs.yaw_replacement || "קה");
     }
     if (prefs.elodim_replace == "true") {
-      replaceHebrewWordInTextElement(textElement, `א[${hebrewMarks}]*ל[${hebrewMarks}]*(?:ו[${hebrewMarks}]*)?ה[${hebrewMarks}]*י[${hebrewMarks}]*ם[${hebrewMarks}]*`, prefs.elodim_replacement || "אלוקים");
+      replaceHebrewWordInTextElement(target, `א[${hebrewMarks}]*ל[${hebrewMarks}]*(?:ו[${hebrewMarks}]*)?ה[${hebrewMarks}]*י[${hebrewMarks}]*ם[${hebrewMarks}]*`, prefs.elodim_replacement || "אלוקים");
     }
     if (prefs.god_replace == "true") {
       // "God" and "GOD" only; lowercase "god"/"gods" are untouched.
       const godReplacement = prefs.god_replacement || "G-d";
-      replaceRegexInTextElement(textElement, /\bGod\b/g, godReplacement);
-      replaceRegexInTextElement(textElement, /\bGOD\b/g, godReplacement.toUpperCase());
+      replaceRegexInTextElement(target, /\bGod\b/g, godReplacement);
+      replaceRegexInTextElement(target, /\bGOD\b/g, godReplacement.toUpperCase());
     }
   });
 
-  ui.alert(divineNameTransformSummary_(replacedCount));
+  ui.alert(divineNameTransformSummary_(replacedCount, scope));
 }
 
 // Selection ranges can name a paragraph, table cell or other container, not
@@ -1557,42 +1600,59 @@ function buildLinkSourcesInsertOptions_(prefs) {
 }
 
 function unlinkSefariaSources() {
-  const body = DocumentApp.getActiveDocument().getBody();
-  const sefariaHostRe = /^https?:\/\/(?:[^/?#]*\.)?sefaria\.org(?:[/?#]|$)/i;
-  const textElements = [];
-  const collect = (element) => {
+  const ui = DocumentApp.getUi();
+  if (ui.alert('Unlink Sources',
+    'Remove Sefaria hyperlinks throughout this document, including every tab, header, footer, and footnote? Text and other hyperlinks will stay in place.',
+    ui.ButtonSet.YES_NO) !== ui.Button.YES) return;
+
+  const doc = DocumentApp.getActiveDocument();
+  const sefariaHostRe = /^https?:\/\/(?:[a-z0-9-]+\.)*sefaria\.org(?::[0-9]+)?(?:[/?#]|$)/i;
+  let unlinkedCount = 0;
+
+  function visitUnlinkElement(element) {
     if (!element) return;
     if (element.getType && element.getType() === DocumentApp.ElementType.TEXT) {
-      textElements.push(element.asText());
+      const text = element.asText();
+      const length = text.getText().length;
+      if (!length) return;
+      const boundaries = text.getTextAttributeIndices();
+      const starts = boundaries[0] === 0 ? boundaries : [0].concat(boundaries);
+      const ranges = [];
+      starts.forEach(function (start, i) {
+        const url = text.getLinkUrl(start);
+        if (!url || !sefariaHostRe.test(url)) return;
+        const end = (i + 1 < starts.length ? starts[i + 1] : length) - 1;
+        const last = ranges[ranges.length - 1];
+        if (last && last.url === url && last.end + 1 === start) last.end = end;
+        else ranges.push({ start: start, end: end, url: url });
+      });
+      ranges.forEach(function (range) {
+        text.setLinkUrl(range.start, range.end, null);
+        unlinkedCount++;
+      });
       return;
     }
     if (!element.getNumChildren) return;
     const count = element.getNumChildren();
-    for (let i = 0; i < count; i++) collect(element.getChild(i));
-  };
-  collect(body);
+    for (let i = 0; i < count; i++) visitUnlinkElement(element.getChild(i));
+  }
 
-  let unlinkedCount = 0;
-  textElements.forEach((textElement) => {
-    const text = textElement.getText();
-    const len = text.length;
-    if (!len) return;
-    let i = 0;
-    while (i < len) {
-      const url = textElement.getLinkUrl(i);
-      if (url && sefariaHostRe.test(url)) {
-        let j = i + 1;
-        while (j < len && textElement.getLinkUrl(j) === url) j++;
-        textElement.setLinkUrl(i, j - 1, null);
-        unlinkedCount++;
-        i = j;
-      } else {
-        i++;
-      }
-    }
-  });
+  function visitUnlinkSections(tab) {
+    visitUnlinkElement(tab.getBody());
+    visitUnlinkElement(tab.getHeader());
+    visitUnlinkElement(tab.getFooter());
+    (tab.getFootnotes() || []).forEach(function (note) { visitUnlinkElement(note.getFootnoteContents()); });
+  }
 
-  DocumentApp.getUi().alert(`Removed ${unlinkedCount} Sefaria hyperlink${unlinkedCount === 1 ? '' : 's'}.`);
+  function visitUnlinkTab(tab) {
+    visitUnlinkSections(tab.asDocumentTab());
+    tab.getChildTabs().forEach(visitUnlinkTab);
+  }
+
+  doc.getTabs().forEach(visitUnlinkTab);
+  ui.alert(unlinkedCount
+    ? `Removed ${unlinkedCount} Sefaria hyperlink${unlinkedCount === 1 ? '' : 's'}.`
+    : 'No Sefaria hyperlinks found in this document.');
 }
 
 function insertSourceFromSelection() {

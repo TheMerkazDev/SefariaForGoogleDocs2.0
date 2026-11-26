@@ -129,6 +129,8 @@ against the screenshot taken before the push.
 | D13 | Set Notes differently in User Profile, a named profile, and This Document. With the named profile in use, choose This Document → Details → Reset options → **Clone Account Settings**. | Confirmation describes replacement. The Doc receives the saved User Profile setting. The named profile stays active for another Doc, and later User Profile edits do not change the cloned value. |
 | D14 | With an unsaved edit, try the add-on’s **✕ Close Preferences** and Escape from the form. Test all three choices and a failed save. Repeat using the Google Docs title-bar X and record whether the browser shows its native warning. | Cancel keeps edits, Don’t save drops them, and Save & Close waits for success. A failed save keeps the form open. Clean forms close without prompting. Google Docs controls the outer dialog close. |
 | D15 | Use Import/Export from This Document, and restore the updated Factory preset. | The transfer says it is loading saved settings. Factory selects Simple, uses right-side Hebrew, separates Notes, and uses Quiet Link Texts review. |
+| D16 | Share a test Doc with a second account as an editor. Use a separate browser profile with only each test account signed in. After authorizing the add-on, open both the sidebar and **Preferences**, run a Texts search, then save different **This Document** settings and reopen. | Both accounts can load the sidebar and Preferences and complete a search after authorization. Each sees its own settings in the shared Doc. If personal storage is unavailable but the Apps Script opening action still runs, the read-only preset preview appears. Test an explicitly shared preset and an unset preset. In a multi-account session or while signed out, record any host error or unavailable menu and repeat in the single-account fixture. |
+| D16a | Before the second editor authorizes the add-on, open the shared Doc and inspect the add-on menu. Select **Add Sources with Sefaria** and complete authorization. Choose a menu layout, then reopen the Doc. | The starter menu shows **Add Sources with Sefaria**, **Link Texts with Sefaria**, and **Transform Divine Names** in that order, followed by **Preferences** and **Help**. Quick Actions, Gematriya Count, and Unlink Sources are hidden. After setup, reopening shows the editor’s saved menu. |
 
 ---
 
@@ -242,7 +244,7 @@ against the screenshot taken before the push.
 | I4 | Vowels and Cantillation on; insert `Genesis 2:4` | יְהוָ֥ה becomes יְיָ֥ (or יְקוָ֥ק), keeping its marks; with השם it keeps the cantillation |
 | I5 | The אלוהים rule on; insert `Genesis 1:1` | אֱלֹהִ֑ים becomes אֱלוֹקִ֑ים, marks kept |
 | I6 | English replacement on; insert a translation with *God* and *GOD* | *G-d* and *G-D*; *god* and *gods* untouched |
-| I7 | Select a word; **Quick Actions → Transform Divine Names**; Cancel; run again and confirm | A confirmation naming what it changes (the body of the open tab, not the selection, headers, footers or footnotes) and the rules that are on; Cancel changes nothing; then every match is replaced, אֶת־יְהוָה included, and it says how many |
+| I7 | Highlight a passage containing a divine name. Leave an identical name outside it. Run **Transform Divine Names**, first canceling, then confirming. Repeat with the selection cleared. | The prompt names the selection, then the whole active tab body after it is cleared. Only complete matches inside the confirmed scope change, including names after a maqaf. Both results report the count and scope. |
 | I8 | **Apply Divine-Name Replacements On Insertion** off; insert `Genesis 2:4` | The Name as Sefaria has it |
 
 ---
@@ -319,7 +321,8 @@ Build one test document containing, in this order:
 | # | Check | Expected |
 | --- | --- | --- |
 | L1 | Select `Genesis 1:1` on its own line; **Insert Source from Selection**; confirm Insert in review | The own-line citation is replaced by the source, titled `Genesis 1:1`, if replacement is enabled. With replacement off the citation stays; inside prose it also stays. No write before Apply. |
-| L2 | Quick Actions → **Unlink Sources** | Removes sefaria.org links, leaves other links alone |
+| L2 | In standard Simple and Everything, find **Quick Actions → Unlink Sources**. Test a second tab and a child tab, headers, footers, and footnotes. Decline once, then confirm. | Declining leaves the Doc alone. Confirming removes sefaria.org hyperlinks across the Doc, keeps the linked text and unrelated hyperlinks, and reports the number removed. |
+| L2a | Enable a Hebrew and English rule. Open **Transform Divine Names** and cancel. In **Transliteration Mapping**, open **Spelling suggestions** with HaShem already filled. Pick one, type a custom spelling, save and reopen. Then clear the field, save and reopen. | Hebrew arrows point left toward their replacements and the English arrow points right. All suggestions are available. The custom spelling survives reopening. A cleared field stays blank and transliteration uses HaShem. |
 | L3 | Quick Actions → **Gematriya Count**, with Hebrew selected and with nothing selected | A value for the selection, then for the whole document |
 | L4 | Preferences → 🧪 Experimental: turn on Surprise Me. Compare the sidebar's 🧪 card with *Menu → Surprise Me* | The same form; the status says how many were inserted and for which word |
 | L5 | Set Stacked, Line numbers off and Citation on in Preferences; in the sidebar's Insertion Options switch to Right–Left; run Surprise Me | Inserted Stacked, unnumbered, with titles linked and the credit line: the saved defaults, not the sidebar's session change |
@@ -506,11 +509,12 @@ checklist was run against the code that shipped.
 
 | Case | Action | Expected |
 | --- | --- | --- |
-| S1 | In Preferences, open Insertion → Insertion Defaults → Texts in Simple and Everything | Notes is visible above the Source and Translation sections, with Omit / Inline / Separate and one selected value. It is not buried in Layout. |
+| S1 | In Preferences, open Insertion → Insertion Defaults → Texts in Simple and Everything | Notes sits directly below Commentary, with Separate / Inline / Omit and one selected value. Both rows show ⓘ help on hover and keyboard focus. Repeat in the sidebar at its default narrow width and check the Commentary label and icon have separate space. |
 | S2 | Save Notes: Inline, open sidebar Text and notes; change to Separate for the session, reopen Preferences | Sidebar starts Inline; Separate is temporary until Save as defaults; Preferences still shows Inline. Save as defaults, reopen, verify Separate. |
 | S3 | Compare all shared controls in Preferences and sidebar; change Display to Original, Both, Translation | Notes remains applicable in each; Preferences keeps defaults editable for other display choices; sidebar hides only inapplicable or explicitly disabled controls. |
-| S4 | Switch saved profile and use Import/Export or Reset to Defaults; inspect Notes and other shared options | Notes follows the active saved profile/defaults, not a stale session; Reset returns Omit. |
+| S4 | Switch saved profile and use Import/Export or Reset to Defaults; inspect Notes and other shared options | Notes follows the active saved profile or defaults. In a document inheriting the account menu, Restore Factory preset returns Notes to Separate and the menu starts with Add Sources with Sefaria, Link Texts with Sefaria, and Transform Divine Names in that order, followed by Preferences and Help. Quick Actions, Gematriya Count, and Unlink Sources are hidden. |
 | S5 | Run Link Texts → Customize this insertion; choose Notes with either language | Notes is available outside the language sections and applies only to the pass until Save as defaults. |
+| S6 | Reopen the sidebar several times, including after a warm load. Trigger an operation from the Extensions menu and again from the sidebar where available | Controls respond on every open. Record when Google Docs displays its own script-status toast and whether the add-on provides operation-specific feedback. |
 
 ### T — repeated citation detection (pending live verification)
 
